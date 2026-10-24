@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { fileToBase64, dataUrlToBase64 } from '@/lib/fileToBase64';
 import { renderAllPages, RenderedPage } from '@/lib/pdfRender';
-import { cleanViaLabel, getCanonicalFieldInfo } from '@/lib/generateFilledPdf';
+import { cleanViaLabel, getCanonicalFieldInfo, ensureReceitaDateField } from '@/lib/generateFilledPdf';
 import { useAiGenerate } from '@/hooks/useAiGenerate';
 import { useToast } from '@/hooks/useToast';
 import { useFormTemplates } from '@/hooks/useFormTemplates';
@@ -145,13 +145,14 @@ export default function CriarFormulario() {
     renderAllPages(existing.pdfBase64, 1.5)
       .then((rendered) => {
         if (cancelled) return;
-        setEditingId(existing.id);
-        setTemplateName(existing.name);
-        setCategory(existing.category || 'outro');
-        setPdfBase64(existing.pdfBase64);
+        const enriched = ensureReceitaDateField(existing);
+        setEditingId(enriched.id);
+        setTemplateName(enriched.name);
+        setCategory(enriched.category || 'outro');
+        setPdfBase64(enriched.pdfBase64);
         setPages(rendered);
-        setFields(existing.fields);
-        setActiveFieldId(existing.fields[0]?.id ?? null);
+        setFields(enriched.fields);
+        setActiveFieldId(enriched.fields[0]?.id ?? null);
         setCurrentPage(0);
         setStep('ajustar');
       })
@@ -250,14 +251,24 @@ export default function CriarFormulario() {
         }
       });
 
-      if (detectedAll.length === 0) {
+      const finalFields = ensureReceitaDateField({
+        id: 'temp',
+        name: templateName,
+        category,
+        pdfBase64: '',
+        pages: [],
+        fields: detectedAll,
+        createdAt: '',
+      }).fields;
+
+      if (finalFields.length === 0) {
         toast('Nenhum campo foi detectado automaticamente. Você pode adicionar caixas clicando na página.', 'info');
       } else {
-        toast(`${detectedAll.length} campos detectados automaticamente! Ajuste ou adicione novos se desejar.`, 'success');
+        toast(`${finalFields.length} campos detectados automaticamente! Ajuste ou adicione novos se desejar.`, 'success');
       }
 
-      setFields(detectedAll);
-      setActiveFieldId(detectedAll[0]?.id ?? null);
+      setFields(finalFields);
+      setActiveFieldId(finalFields[0]?.id ?? null);
       setCurrentPage(0);
       setStep('ajustar');
     } finally {
@@ -425,18 +436,26 @@ export default function CriarFormulario() {
     );
   };
 
-  const addManualFieldAt = (xNorm = 0.1, yNorm = 0.1, type: FieldType = 'text') => {
+  const addManualFieldAt = (xNorm = 0.1, yNorm = 0.1, type: FieldType = 'text', customLabel?: string) => {
     const id = `f${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
     const newField: FormField = {
       id,
-      label: type === 'prescription' ? 'Prescrição' : type === 'checkbox' ? 'Opção [X]' : `Campo ${fields.length + 1}`,
+      label:
+        customLabel ||
+        (type === 'prescription'
+          ? 'Prescrição'
+          : type === 'date'
+          ? 'Data de Solicitação'
+          : type === 'checkbox'
+          ? 'Opção [X]'
+          : `Campo ${fields.length + 1}`),
       type,
       page: currentPage,
       xNorm,
       yNorm,
-      wNorm: type === 'checkbox' ? 0.025 : type === 'prescription' ? 0.8 : 0.28,
+      wNorm: type === 'checkbox' ? 0.025 : type === 'prescription' ? 0.8 : type === 'date' ? 0.24 : 0.28,
       hNorm: type === 'checkbox' ? 0.022 : type === 'prescription' ? 0.35 : type === 'textarea' ? 0.08 : 0.028,
-      fontSize: category === 'guia' ? 8 : 10,
+      fontSize: type === 'date' ? 12.06 : category === 'guia' ? 8 : 10,
     };
     setFields((prev) => [...prev, newField]);
     setActiveFieldId(id);
@@ -461,7 +480,7 @@ export default function CriarFormulario() {
     });
 
     const savedId = editingId || `tpl_${Date.now()}`;
-    await saveTemplate({
+    const candidateTemplate = ensureReceitaDateField({
       id: savedId,
       name: templateName.trim(),
       category,
@@ -470,6 +489,7 @@ export default function CriarFormulario() {
       fields: normalizedFields,
       createdAt: new Date().toISOString(),
     });
+    await saveTemplate(candidateTemplate);
     toast('Molde PDF salvo com sucesso! Abrindo para preenchimento...', 'success');
     navigate('/formularios', { state: { selectedForm: savedId } });
   };
@@ -656,14 +676,14 @@ export default function CriarFormulario() {
                           },
                           {
                             id: 'f_data',
-                            label: 'Data do Pedido',
+                            label: 'Data de Solicitação',
                             type: 'date',
                             page: 0,
-                            xNorm: 0.14,
-                            yNorm: 0.84,
-                            wNorm: 0.22,
-                            hNorm: 0.03,
-                            fontSize: 10,
+                            xNorm: 0.21,
+                            yNorm: 0.915,
+                            wNorm: 0.24,
+                            hNorm: 0.028,
+                            fontSize: 12.06,
                           },
                         ]);
                         setActiveFieldId('f_nome');
@@ -776,6 +796,15 @@ export default function CriarFormulario() {
                   className="h-8 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50"
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" /> + Bloco Prescrição
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addManualFieldAt(0.21, 0.915, 'date', 'Data de Solicitação')}
+                  className="h-8 text-xs text-teal-700 border-teal-200 hover:bg-teal-50"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> + Data de Solicitação
                 </Button>
                 <Button
                   type="button"

@@ -18,6 +18,8 @@ import {
   FolderKanban,
   Bed,
   Pencil,
+  Calendar,
+  ChevronDown,
 } from 'lucide-react';
 import { useFormTemplates } from '@/hooks/useFormTemplates';
 import { useEnfermariaPatients } from '@/hooks/useEnfermariaPatients';
@@ -31,6 +33,9 @@ import {
   groupMirroredFields,
   isPrescriptionField,
   isRequestedExamsField,
+  isDateField,
+  ensureReceitaDateField,
+  type VerticalAlignMode,
 } from '@/lib/generateFilledPdf';
 import { prepareFileInlineData } from '@/lib/fileToBase64';
 import { PdfLiveViewer } from '@/components/formularios/PdfLiveViewer';
@@ -52,14 +57,24 @@ const QUANTIDADE_SUGGESTIONS = [
 ];
 
 function todayBr(): string {
-  const iso = new Date().toISOString().split('T')[0];
-  return formatDateBr(iso);
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyy = now.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
-function isDateField(field: FormField): boolean {
-  if (field.type === 'date') return true;
-  const lower = field.label.toLowerCase();
-  return lower === 'data' || lower.includes('data d') || lower.includes('nascimento');
+function brDateToIso(br: string): string {
+  const match = (br || '').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return '';
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function maskDateBrInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
 }
 
 export default function Formularios() {
@@ -96,6 +111,7 @@ export default function Formularios() {
 
   const [templateValues, setTemplateValues] = useState<Record<string, string>>({});
   const [fieldFontSizes, setFieldFontSizes] = useState<Record<string, number>>({});
+  const [fieldAlignments, setFieldAlignments] = useState<Record<string, VerticalAlignMode>>({});
   const [prescricaoMode, setPrescricaoMode] = useState<'formulario' | 'livre'>('formulario');
   const [medications, setMedications] = useState<MedicationItem[]>([
     { id: '1', via: 'Oral', quantidade: 'CONTÍNUO', item: '', posologia: '' },
@@ -118,18 +134,18 @@ export default function Formularios() {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
 
-  // Resolve activeTemplate from user templates
+  // Resolve activeTemplate from user templates (ensuring Receitas always have Data de Solicitação)
   useEffect(() => {
     const custom = templates.find((t) => t.id === formType);
     if (custom) {
-      setActiveTemplate(custom);
+      setActiveTemplate(ensureReceitaDateField(custom));
       setIsLoadingTemplate(false);
       return;
     }
 
     if (templates.length > 0 && (!formType || !templates.some((t) => t.id === formType))) {
       setFormType(templates[0].id);
-      setActiveTemplate(templates[0]);
+      setActiveTemplate(ensureReceitaDateField(templates[0]));
       setIsLoadingTemplate(false);
       return;
     }
@@ -144,16 +160,14 @@ export default function Formularios() {
     if (!activeTemplate) return;
 
     const initialSizes: Record<string, number> = {};
+    const initialAligns: Record<string, VerticalAlignMode> = {};
     const initialValues: Record<string, string> = {};
 
     activeTemplate.fields.forEach((f) => {
-      initialSizes[f.id] = f.fontSize || 10;
       const lower = f.label.toLowerCase();
-
-      // Default today's date on request/attendance date fields (not birth date)
-      if (isDateField(f) && !lower.includes('nascimento')) {
-        initialValues[f.id] = todayBr();
-      }
+      const isReqDate = isDateField(f) && !lower.includes('nascimento');
+      initialSizes[f.id] = f.fontSize || (isReqDate ? 12.06 : 10);
+      initialAligns[f.id] = 'bottom';
 
       // Pre-fill from location.state if navigating from Ambulatório or Enfermaria
       if (locState.patientName && (lower.includes('paciente') || f.id === 'nome')) {
@@ -209,6 +223,7 @@ export default function Formularios() {
     }
 
     setFieldFontSizes(initialSizes);
+    setFieldAlignments(initialAligns);
     setTemplateValues(initialValues);
     setSelectedPresetId('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -244,7 +259,7 @@ export default function Formularios() {
   useEffect(() => {
     if (!activeTemplate) return;
     const timer = setTimeout(() => {
-      generateFilledPdf(activeTemplate, templateValues, { fieldFontSizes })
+      generateFilledPdf(activeTemplate, templateValues, { fieldFontSizes, fieldAlignments })
         .then((bytes) => {
           setPdfBytes(bytes);
         })
@@ -254,7 +269,7 @@ export default function Formularios() {
     }, 240);
 
     return () => clearTimeout(timer);
-  }, [activeTemplate, templateValues, fieldFontSizes]);
+  }, [activeTemplate, templateValues, fieldFontSizes, fieldAlignments]);
 
   // Group fields across 1ª Via and 2ª Via so the user fills each field only once
   const fieldGroups = React.useMemo(
@@ -276,7 +291,7 @@ export default function Formularios() {
     setFieldFontSizes((prev) => {
       const primaryId = groupFields[0]?.id;
       const current = (primaryId ? prev[primaryId] : undefined) ?? defaultSize;
-      const nextSize = Math.max(5, Math.min(24, Number((current + delta).toFixed(1))));
+      const nextSize = Math.max(5, Math.min(24, Number((current + delta).toFixed(2))));
       const next = { ...prev };
       groupFields.forEach((f) => {
         next[f.id] = nextSize;
@@ -285,15 +300,19 @@ export default function Formularios() {
     });
   };
 
+  const setGroupAlignment = (groupFields: FormField[], align: VerticalAlignMode) => {
+    setFieldAlignments((prev) => {
+      const next = { ...prev };
+      groupFields.forEach((f) => {
+        next[f.id] = align;
+      });
+      return next;
+    });
+  };
+
   const handleClearForm = () => {
     if (!activeTemplate) return;
-    const cleared: Record<string, string> = {};
-    activeTemplate.fields.forEach((f) => {
-      if (isDateField(f) && !f.label.toLowerCase().includes('nascimento')) {
-        cleared[f.id] = todayBr();
-      }
-    });
-    setTemplateValues(cleared);
+    setTemplateValues({});
     setMedications([{ id: '1', via: 'Oral', quantidade: 'CONTÍNUO', item: '', posologia: '' }]);
     setSelectedPresetId('');
     toast('Campos limpos.', 'info');
@@ -478,7 +497,10 @@ export default function Formularios() {
     if (!activeTemplate) return;
     setIsGeneratingPdf(true);
     try {
-      const bytes = await generateFilledPdf(activeTemplate, templateValues, { fieldFontSizes });
+      const bytes = await generateFilledPdf(activeTemplate, templateValues, {
+        fieldFontSizes,
+        fieldAlignments,
+      });
       const patientLabel = templateValues.nome ? ` - ${templateValues.nome.slice(0, 30)}` : '';
       downloadPdfBytes(bytes, `${activeTemplate.name}${patientLabel}.pdf`);
       toast('PDF baixado com sucesso!', 'success');
@@ -492,11 +514,11 @@ export default function Formularios() {
 
   const handleCustomizeTemplateBoxes = async () => {
     if (!activeTemplate) return;
+    const enriched = ensureReceitaDateField(activeTemplate);
     if (activeTemplate.isBuiltIn) {
-      // Save a customizable copy of the built-in template so user can move/add boxes freely
       const copyId = `tpl_${activeTemplate.id}_${Date.now()}`;
       const copyTemplate: FormTemplate = {
-        ...activeTemplate,
+        ...enriched,
         id: copyId,
         name: `${activeTemplate.name} (Personalizado)`,
         isBuiltIn: false,
@@ -505,6 +527,9 @@ export default function Formularios() {
       await saveTemplate(copyTemplate);
       navigate('/formularios/novo', { state: { editTemplateId: copyId } });
     } else {
+      if (enriched.fields.length !== activeTemplate.fields.length) {
+        await saveTemplate(enriched);
+      }
       navigate('/formularios/novo', { state: { editTemplateId: activeTemplate.id } });
     }
   };
@@ -971,16 +996,20 @@ export default function Formularios() {
                   const currentPt = fieldFontSizes[field.id] ?? field.fontSize ?? 10;
                   const isPresc = isPrescriptionField(field, activeTemplate);
                   const isDate = isDateField(field);
+                  const isBirthDate = isDate && group.label.toLowerCase().includes('nascimento');
+                  const defaultFieldPt = isDate && !isBirthDate ? 12.06 : 10;
+                  const effectivePt = fieldFontSizes[field.id] ?? field.fontSize ?? defaultFieldPt;
+                  const currentAlign: VerticalAlignMode = fieldAlignments[field.id] || 'bottom';
                   const isExamList = isRequestedExamsField(field, activeTemplate);
                   const isSexoField =
                     group.label.toLowerCase().includes('sexo') && field.type !== 'checkbox';
 
                   return (
-                    <div key={group.key} className="space-y-2">
-                      {/* Field Header Row with Label + Multi-Via Badge + Per-Field Font Stepper (- 8.5 + pt) */}
+                    <div key={group.key} className="space-y-2.5">
+                      {/* Field Header Row with Label + Multi-Via Badge + Per-Field Font Stepper (- 12.06 + pt) + Alignment Selector */}
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Label className="text-[11px] font-bold tracking-wider uppercase text-slate-500">
+                          <Label className="text-[11px] font-bold tracking-[0.14em] uppercase text-slate-500">
                             {group.label}
                             {field.required && <span className="text-red-500 ml-1">*</span>}
                           </Label>
@@ -995,27 +1024,47 @@ export default function Formularios() {
                         </div>
 
                         {field.type !== 'checkbox' && (
-                          <div className="flex items-center border border-slate-200 rounded-full bg-slate-50/80 h-7 px-2 gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => adjustGroupFontSize(groupFields, -0.5, field.fontSize || 10)}
-                              className="text-slate-500 hover:text-slate-900 font-bold text-xs px-1"
-                              title="Diminuir tamanho da fonte deste campo"
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center border border-slate-200 rounded-full bg-white h-8 px-2.5 gap-2 shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={() => adjustGroupFontSize(groupFields, -0.5, field.fontSize || defaultFieldPt)}
+                                className="text-slate-500 hover:text-slate-900 font-bold text-xs px-1 transition-colors"
+                                title="Diminuir tamanho da fonte deste campo"
+                              >
+                                −
+                              </button>
+                              <span className="text-xs font-bold font-mono tabular-nums text-slate-800 min-w-[34px] text-center">
+                                {effectivePt}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => adjustGroupFontSize(groupFields, 0.5, field.fontSize || defaultFieldPt)}
+                                className="text-slate-500 hover:text-slate-900 font-bold text-xs px-1 transition-colors"
+                                title="Aumentar tamanho da fonte deste campo"
+                              >
+                                +
+                              </button>
+                              <span className="text-[11px] text-slate-400">pt</span>
+                            </div>
+
+                            <div
+                              className="relative flex items-center border border-slate-200 rounded-full bg-white h-8 px-2.5 shadow-2xs"
+                              title="Alinhamento vertical do texto dentro da caixa do PDF"
                             >
-                              −
-                            </button>
-                            <span className="text-[11px] font-semibold font-mono tabular-nums text-slate-800 min-w-[28px] text-center">
-                              {currentPt}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => adjustGroupFontSize(groupFields, 0.5, field.fontSize || 10)}
-                              className="text-slate-500 hover:text-slate-900 font-bold text-xs px-1"
-                              title="Aumentar tamanho da fonte deste campo"
-                            >
-                              +
-                            </button>
-                            <span className="text-[10px] text-slate-400">pt</span>
+                              <select
+                                value={currentAlign}
+                                onChange={(e) =>
+                                  setGroupAlignment(groupFields, e.target.value as VerticalAlignMode)
+                                }
+                                className="appearance-none bg-transparent pr-4 pl-0.5 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                              >
+                                <option value="bottom">▼</option>
+                                <option value="middle">•</option>
+                                <option value="top">▲</option>
+                              </select>
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-500 pointer-events-none absolute right-2" />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1153,11 +1202,11 @@ export default function Formularios() {
                                         next[index] = { ...next[index], posologia: e.target.value };
                                         setMedications(next);
                                       }}
-                                      placeholder="EX: TOMAR 1 COMPRIMIDO DE 12/12H"
+                                      placeholder="EX: 1.0.1 OU TOMAR 1 COMPRIMIDO DE 12/12H"
                                       className="h-10 rounded-xl bg-white border-slate-200 text-sm"
                                     />
                                     <p className="text-[11px] text-slate-400 pt-0.5">
-                                      Preencha os campos · a formatação com linhas tracejadas para o PDF é automática
+                                      Enter pula linha · cada linha vira um tópico na receita
                                     </p>
                                   </div>
                                 </div>
@@ -1182,25 +1231,61 @@ export default function Formularios() {
                               >
                                 <Plus className="w-4 h-4 mr-1.5" /> Adicionar medicamento
                               </Button>
+
+                              <p className="text-xs text-slate-400 pt-1">
+                                Preencha os campos · a formatação para o PDF é automática
+                              </p>
                             </div>
                           )}
                         </div>
                       ) : isDate ? (
-                        /* B. Date Field with "Hoje" Quick Button (Reference Image 1) */
+                        /* B. Date Field with "DD/MM/AAAA", "Hoje" Quick Button & Calendar Picker (Matching Screenshot) */
                         <div className="relative flex items-center">
                           <Input
                             value={currentVal}
-                            onChange={(e) => setGroupValue(groupFields, e.target.value)}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const nextVal = /^\d[\d/]*$/.test(raw) ? maskDateBrInput(raw) : raw;
+                              setGroupValue(groupFields, nextVal);
+                            }}
                             placeholder="DD/MM/AAAA"
-                            className="h-11 rounded-xl border-slate-200 pr-20 text-sm"
+                            className="h-12 rounded-2xl border-slate-200 bg-white pl-4 pr-28 text-sm text-slate-800 placeholder:text-slate-300"
                           />
-                          <button
-                            type="button"
-                            onClick={() => setGroupValue(groupFields, todayBr())}
-                            className="absolute right-2.5 px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
-                          >
-                            Hoje
-                          </button>
+                          <div className="absolute right-3 flex items-center gap-2">
+                            {!isBirthDate && (
+                              <button
+                                type="button"
+                                onClick={() => setGroupValue(groupFields, todayBr())}
+                                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200/80 border border-slate-200/80 text-slate-700 text-xs font-semibold transition-colors"
+                                title="Preencher com a data de hoje"
+                              >
+                                Hoje
+                              </button>
+                            )}
+                            <label
+                              className="relative p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center"
+                              title="Selecionar data no calendário"
+                            >
+                              <Calendar className="w-4 h-4 pointer-events-none" />
+                              <input
+                                type="date"
+                                value={brDateToIso(currentVal)}
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    setGroupValue(groupFields, formatDateBr(e.target.value));
+                                  }
+                                }}
+                                onClick={(e) => {
+                                  try {
+                                    (e.currentTarget as any).showPicker?.();
+                                  } catch {
+                                    // fallback to native click
+                                  }
+                                }}
+                                className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                              />
+                            </label>
+                          </div>
                         </div>
                       ) : isSexoField ? (
                         /* C. Sexo Quick Toggle Buttons (Reference Image 3) */

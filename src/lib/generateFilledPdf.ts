@@ -112,6 +112,78 @@ export function isRequestedExamsField(field: FormField, template?: FormTemplate 
   return false;
 }
 
+export function isDateField(field: FormField): boolean {
+  if (field.type === 'date') return true;
+  const lower = (field.label || '').toLowerCase();
+  return (
+    lower === 'data' ||
+    lower.includes('data d') ||
+    lower.includes('data solic') ||
+    lower.includes('data emiss') ||
+    lower.includes('nascimento')
+  );
+}
+
+export function isReceitaTemplate(template?: FormTemplate | null): boolean {
+  if (!template) return false;
+  if (template.category === 'receita') return true;
+  const nameLower = (template.name || '').toLowerCase();
+  if (nameLower.includes('receit') || nameLower.includes('prescri')) return true;
+  return (template.fields || []).some(
+    (f) => f.type === 'prescription' || (f.label || '').toLowerCase().includes('prescri')
+  );
+}
+
+/**
+ * Ensures that any Receita template has a "Data de Solicitação" field so the user
+ * always has the date option available on prescriptions.
+ */
+export function ensureReceitaDateField(template: FormTemplate): FormTemplate {
+  if (!isReceitaTemplate(template)) return template;
+
+  const hasRequestDate = (template.fields || []).some(
+    (f) => isDateField(f) && !(f.label || '').toLowerCase().includes('nascimento')
+  );
+  if (hasRequestDate) return template;
+
+  const prescFields = (template.fields || []).filter((f) => isPrescriptionField(f, template));
+  const extraDateFields: FormField[] = [];
+
+  if (prescFields.length > 0) {
+    prescFields.forEach((pf, idx) => {
+      const suggestedY = Math.min(0.92, Math.max(0.84, pf.yNorm + pf.hNorm + 0.035));
+      extraDateFields.push({
+        id: idx === 0 ? 'f_data_solicitacao' : `f_data_solicitacao_${idx + 1}`,
+        label: 'Data de Solicitação',
+        type: 'date',
+        page: pf.page || 0,
+        xNorm: Math.min(0.8, pf.xNorm + 0.12),
+        yNorm: suggestedY,
+        wNorm: Math.min(0.24, pf.wNorm * 0.45),
+        hNorm: 0.026,
+        fontSize: 12.06,
+      });
+    });
+  } else {
+    extraDateFields.push({
+      id: 'f_data_solicitacao',
+      label: 'Data de Solicitação',
+      type: 'date',
+      page: 0,
+      xNorm: 0.21,
+      yNorm: 0.915,
+      wNorm: 0.24,
+      hNorm: 0.026,
+      fontSize: 12.06,
+    });
+  }
+
+  return {
+    ...template,
+    fields: [...template.fields, ...extraDateFields],
+  };
+}
+
 /**
  * Computes a canonical key and clean display label for a field so that duplicate boxes
  * across 1ª Via and 2ª Via are unified into a single input in the UI and filled together.
@@ -149,10 +221,18 @@ export function getCanonicalFieldInfo(
   ) {
     norm = 'identificacao emitente';
   } else if (
-    field.type === 'date' &&
-    (norm === 'data' || norm === 'data pedido' || norm === 'data receita' || norm === 'data emissao')
+    (field.type === 'date' || isDateField(field)) &&
+    (norm === 'data' ||
+      norm === 'data pedido' ||
+      norm === 'data receita' ||
+      norm === 'data emissao' ||
+      norm === 'data solicitacao' ||
+      norm === 'data atendimento')
   ) {
-    norm = 'data emissao';
+    return {
+      key: 'date::data_solicitacao',
+      label: 'Data de Solicitação',
+    };
   }
 
   return {
@@ -291,8 +371,11 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   return lines;
 }
 
+export type VerticalAlignMode = 'bottom' | 'middle' | 'top';
+
 export interface GeneratePdfOptions {
   fieldFontSizes?: Record<string, number>;
+  fieldAlignments?: Record<string, VerticalAlignMode>;
   globalFontSize?: number;
 }
 
@@ -302,10 +385,11 @@ export interface GeneratePdfOptions {
  * Automatically mirrors values across 1ª Via and 2ª Via fields that belong to the same group.
  */
 export async function generateFilledPdf(
-  template: FormTemplate,
+  rawTemplate: FormTemplate,
   values: Record<string, string>,
   optionsOrFontSize?: number | GeneratePdfOptions
 ): Promise<Uint8Array> {
+  const template = ensureReceitaDateField(rawTemplate);
   const opts: GeneratePdfOptions =
     typeof optionsOrFontSize === 'number'
       ? { globalFontSize: optionsOrFontSize }
@@ -314,6 +398,7 @@ export async function generateFilledPdf(
   // Mirror values & font sizes across multi-via grouped fields so filling 1 box fills all vias
   const mirroredValues: Record<string, string> = { ...values };
   const mirroredFontSizes: Record<string, number> = { ...(opts.fieldFontSizes || {}) };
+  const mirroredAlignments: Record<string, VerticalAlignMode> = { ...(opts.fieldAlignments || {}) };
   const groups = groupMirroredFields(template.fields, template);
 
   for (const group of groups) {
@@ -334,6 +419,14 @@ export async function generateFilledPdf(
       for (const f of group.fields) {
         if (mirroredFontSizes[f.id] === undefined) {
           mirroredFontSizes[f.id] = primarySize;
+        }
+      }
+    }
+    const primaryAlign = mirroredAlignments[group.primaryField.id];
+    if (primaryAlign !== undefined) {
+      for (const f of group.fields) {
+        if (mirroredAlignments[f.id] === undefined) {
+          mirroredAlignments[f.id] = primaryAlign;
         }
       }
     }
@@ -459,12 +552,22 @@ export async function generateFilledPdf(
     const isSingleLine = field.type === 'text' || field.type === 'date';
     const maxLines = isSingleLine ? 1 : Math.max(1, Math.floor((boxH + lineHeight * 0.35) / lineHeight));
     const lines = wrapText(value, font, fontSize, Math.max(boxW - 4, 12)).slice(0, maxLines);
+    const alignMode: VerticalAlignMode = mirroredAlignments[field.id] || 'bottom';
 
     lines.forEach((line, i) => {
-      // Vertically center single-line fields slightly inside their box
-      const yOffset = isSingleLine
-        ? height - boxYTop - Math.min(boxH * 0.72, fontSize + 2)
-        : height - boxYTop - fontSize - 1 - i * lineHeight;
+      let yOffset: number;
+      if (isSingleLine) {
+        if (alignMode === 'top') {
+          yOffset = height - boxYTop - Math.min(boxH * 0.52, fontSize + 1);
+        } else if (alignMode === 'middle') {
+          yOffset = height - boxYTop - boxH / 2 - fontSize * 0.34;
+        } else {
+          // 'bottom' (baseline sits neatly on the line)
+          yOffset = height - boxYTop - Math.max(fontSize, boxH - 2);
+        }
+      } else {
+        yOffset = height - boxYTop - fontSize - 1 - i * lineHeight;
+      }
 
       page.drawText(line, {
         x: boxX + 2,
