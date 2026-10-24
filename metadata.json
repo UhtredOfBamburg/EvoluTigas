@@ -1,0 +1,8 @@
+{
+  "name": "EvoluTigas",
+  "description": "Plataforma médica para evolução clínica de enfermaria, ambulatório inteligente, transcrição de exames, calculadoras médicas e documentos hospitalares.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

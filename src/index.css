@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* Modo Plantão Noturno (Conforto Visual Hospitalar) */
+html.night-shift {
+  color-scheme: dark;
+}
+
+html.night-shift body,
+html.night-shift .bg-slate-50 {
+  background-color: #0b1120 !important;
+  color: #e2e8f0 !important;
+}
+
+html.night-shift .bg-slate-50\/50,
+html.night-shift .bg-slate-50\/60,
+html.night-shift .bg-slate-50\/70,
+html.night-shift .bg-slate-50\/80,
+html.night-shift .bg-slate-100,
+html.night-shift .bg-slate-100\/80 {
+  background-color: #111827 !important;
+  color: #cbd5e1 !important;
+}
+
+html.night-shift .bg-white {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+}
+
+html.night-shift .border-slate-100,
+html.night-shift .border-slate-200,
+html.night-shift .border-slate-200\/70,
+html.night-shift .border-slate-200\/80,
+html.night-shift .border-slate-200\/90,
+html.night-shift .border-slate-300 {
+  border-color: #1e293b !important;
+}
+
+html.night-shift .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.night-shift .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+html.night-shift .text-slate-900,
+html.night-shift .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+html.night-shift .text-slate-700,
+html.night-shift .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.night-shift .text-slate-500,
+html.night-shift .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html.night-shift .bg-teal-50,
+html.night-shift .bg-teal-50\/50,
+html.night-shift .bg-teal-50\/60,
+html.night-shift .bg-teal-50\/70,
+html.night-shift .bg-teal-100 {
+  background-color: rgba(13, 148, 136, 0.16) !important;
+  color: #5eead4 !important;
+}
+
+html.night-shift .text-teal-900,
+html.night-shift .text-teal-800,
+html.night-shift .text-teal-700 {
+  color: #5eead4 !important;
+}
+
+html.night-shift .border-teal-100,
+html.night-shift .border-teal-200,
+html.night-shift .border-teal-300,
+html.night-shift .border-teal-300\/80 {
+  border-color: rgba(45, 212, 191, 0.28) !important;
+}
+
+html.night-shift .bg-amber-50,
+html.night-shift .bg-amber-50\/70,
+html.night-shift .bg-amber-50\/80 {
+  background-color: rgba(217, 119, 6, 0.15) !important;
+}
+
+html.night-shift .text-amber-900,
+html.night-shift .text-amber-800,
+html.night-shift .text-amber-700 {
+  color: #fcd34d !important;
+}
+
+html.night-shift .bg-red-50 {
+  background-color: rgba(220, 38, 38, 0.15) !important;
+}
+
+html.night-shift .text-red-900,
+html.night-shift .text-red-800,
+html.night-shift .text-red-700 {
+  color: #fca5a5 !important;
+}
+
+html.night-shift input:not([type="checkbox"]):not([type="radio"]),
+html.night-shift textarea,
+html.night-shift select {
+  background-color: #0b1324 !important;
+  color: #f1f5f9 !important;
+  border-color: #263449 !important;
+}
+
+html.night-shift input::placeholder,
+html.night-shift textarea::placeholder {
+  color: #64748b !important;
+}
+
+html.night-shift .hover\:bg-slate-50:hover,
+html.night-shift .hover\:bg-slate-50\/70:hover,
+html.night-shift .hover\:bg-slate-100:hover {
+  background-color: #172236 !important;
+}
+
+/* Modo Compacto para Fichas Clínicas (Enfermaria e Ambulatório) */
+.compact-clinical-form .space-y-6 {
+  row-gap: 0.75rem;
+}
+
+.compact-clinical-form .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.75rem !important;
+}
+
+.compact-clinical-form .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.5rem !important;
+}
+
+.compact-clinical-form .p-6,
+.compact-clinical-form .p-5,
+.compact-clinical-form .p-4 {
+  padding: 0.75rem !important;
+}
+
+.compact-clinical-form .py-3 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
