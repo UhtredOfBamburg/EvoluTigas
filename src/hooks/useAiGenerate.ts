@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react';
 import { useToast } from '@/hooks/useToast';
-import { useUser, getActiveAiConnectionsFromStorage } from '@/contexts/UserContext';
+import {
+  useUser,
+  getActiveAiConnectionsFromStorage,
+  mergeAiConnections,
+} from '@/contexts/UserContext';
 import { executeAiGeneration, ExecuteAiPayload } from '@/lib/aiClient';
 
 export type AiGenerateType =
@@ -65,11 +69,14 @@ function parseAiResultText<T>(rawText: string, parseJson?: boolean): T {
 export function useAiGenerate() {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
-  const { remainingToday, incrementDailyUsage, setIsAiModalOpen } = useUser();
+  const { currentUser, remainingToday, incrementDailyUsage, setIsAiModalOpen } = useUser();
 
   const generate = useCallback(
     async <T = string,>(options: GenerateOptions): Promise<T | null> => {
-      const aiConn = getActiveAiConnectionsFromStorage();
+      const aiConn = mergeAiConnections(
+        currentUser?.aiConnections,
+        getActiveAiConnectionsFromStorage()
+      );
       const activeProvider = aiConn.activeProvider || 'builtin';
 
       let aiProviderConfig: { provider: string; apiKey?: string; model?: string } = {
@@ -187,7 +194,7 @@ export function useAiGenerate() {
         setLoading(false);
       }
     },
-    [toast, remainingToday, incrementDailyUsage, setIsAiModalOpen]
+    [currentUser, toast, remainingToday, incrementDailyUsage, setIsAiModalOpen]
   );
 
   return { generate, loading };

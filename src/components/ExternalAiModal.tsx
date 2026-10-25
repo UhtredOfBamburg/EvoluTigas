@@ -491,7 +491,7 @@ export function GlobalModals() {
 
                   <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
                     <span className="text-[11px] text-slate-500">
-                      Sua chave fica salva exclusivamente no navegador da sua conta individual.
+                      Sua chave fica salva na nuvem da sua conta individual (sincronizada em qualquer navegador ou dispositivo).
                     </span>
                     <Button
                       type="button"

@@ -21,6 +21,7 @@ export interface AiConnectionsState {
   geminiKey?: string;
   geminiModel?: string;
   geminiConnected?: boolean;
+  updatedAt?: number;
 }
 
 export const DEFAULT_AI_CONNECTIONS: AiConnectionsState = {
@@ -35,6 +36,7 @@ export const DEFAULT_AI_CONNECTIONS: AiConnectionsState = {
   geminiKey: '',
   geminiModel: 'gemini-4-argon',
   geminiConnected: false,
+  updatedAt: 0,
 };
 
 function normalizeAiConnections(conn?: Partial<AiConnectionsState>): AiConnectionsState {
@@ -51,6 +53,56 @@ function normalizeAiConnections(conn?: Partial<AiConnectionsState>): AiConnectio
     merged.builtinModel = 'gemini-3.8-flash';
   }
   return merged;
+}
+
+/**
+ * Merges cloud and local AI connection states per account without ever letting
+ * an unconfigured browser/device's empty strings overwrite keys saved in the cloud.
+ */
+export function mergeAiConnections(
+  cloud?: Partial<AiConnectionsState>,
+  local?: Partial<AiConnectionsState>
+): AiConnectionsState {
+  const c = normalizeAiConnections(cloud);
+  const l = normalizeAiConnections(local);
+  const cTs = Number(c.updatedAt) || 0;
+  const lTs = Number(l.updatedAt) || 0;
+  const preferLocal = lTs > cTs;
+
+  const pickKey = (cVal?: string, lVal?: string): string => {
+    const cleanC = (cVal || '').trim();
+    const cleanL = (lVal || '').trim();
+    if (preferLocal) return cleanL || cleanC;
+    return cleanC || cleanL;
+  };
+
+  const claudeKey = pickKey(c.claudeKey, l.claudeKey);
+  const chatgptKey = pickKey(c.chatgptKey, l.chatgptKey);
+  const geminiKey = pickKey(c.geminiKey, l.geminiKey);
+
+  let activeProvider: AiChatProvider = preferLocal ? l.activeProvider : c.activeProvider;
+  if (activeProvider === 'builtin') {
+    if (c.activeProvider && c.activeProvider !== 'builtin') {
+      activeProvider = c.activeProvider;
+    } else if (l.activeProvider && l.activeProvider !== 'builtin') {
+      activeProvider = l.activeProvider;
+    }
+  }
+
+  return normalizeAiConnections({
+    activeProvider,
+    builtinModel: (preferLocal ? l.builtinModel : c.builtinModel) || c.builtinModel || l.builtinModel,
+    claudeKey,
+    claudeModel: (preferLocal ? l.claudeModel : c.claudeModel) || c.claudeModel || l.claudeModel,
+    claudeConnected: Boolean(claudeKey) && Boolean(c.claudeConnected || l.claudeConnected),
+    chatgptKey,
+    chatgptModel: (preferLocal ? l.chatgptModel : c.chatgptModel) || c.chatgptModel || l.chatgptModel,
+    chatgptConnected: Boolean(chatgptKey) && Boolean(c.chatgptConnected || l.chatgptConnected),
+    geminiKey,
+    geminiModel: (preferLocal ? l.geminiModel : c.geminiModel) || c.geminiModel || l.geminiModel,
+    geminiConnected: Boolean(geminiKey) && Boolean(c.geminiConnected || l.geminiConnected),
+    updatedAt: Math.max(cTs, lTs),
+  });
 }
 
 export interface AppUser {
@@ -190,7 +242,9 @@ export function getActiveAiConnectionsFromStorage(): AiConnectionsState {
     const raw = localStorage.getItem(CURRENT_USER_KEY);
     if (!raw) return DEFAULT_AI_CONNECTIONS;
     const parsed = JSON.parse(raw) as AppUser;
-    return normalizeAiConnections(parsed?.aiConnections);
+    const reg = loadLocalRegistry();
+    const regConn = parsed?.id ? reg[parsed.id]?.aiConnections : undefined;
+    return mergeAiConnections(regConn, parsed?.aiConnections);
   } catch {
     return DEFAULT_AI_CONNECTIONS;
   }
@@ -202,9 +256,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(CURRENT_USER_KEY);
       if (!raw) return null;
       const user = JSON.parse(raw) as AppUser;
+      const reg = loadLocalRegistry();
       return {
         ...user,
-        aiConnections: normalizeAiConnections(user.aiConnections),
+        aiConnections: mergeAiConnections(reg[user.id]?.aiConnections, user.aiConnections),
       };
     } catch {
       return null;
@@ -248,13 +303,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentUser]);
 
-  // Real-time sync of knownUsers & shared builtin key from Firestore
+  // Real-time sync of knownUsers, active user AI keys & shared builtin key from Firestore
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'formTemplates'),
       (snap) => {
         const reg = loadLocalRegistry();
         let changed = false;
+        const activeUid = getActiveUserIdFromStorage();
+
         snap.forEach((docSnap) => {
           if (docSnap.id === 'system_shared_ai_config') {
             const cfg = docSnap.data() as { geminiKey?: string } | undefined;
@@ -272,16 +329,30 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           } else if (docSnap.id.startsWith('user_profile__')) {
             const data = docSnap.data() as AppUser;
             if (data && data.id && data.name) {
-              const localAi = reg[data.id]?.aiConnections || {};
+              const localAi = reg[data.id]?.aiConnections;
+              const mergedAi = mergeAiConnections(data.aiConnections, localAi);
               reg[data.id] = {
                 ...reg[data.id],
                 ...data,
-                aiConnections: normalizeAiConnections({
-                  ...(data.aiConnections || {}),
-                  ...localAi,
-                }),
+                aiConnections: mergedAi,
               };
               changed = true;
+
+              if (activeUid && data.id === activeUid) {
+                setCurrentUser((prev) => {
+                  if (!prev || prev.id !== activeUid) return prev;
+                  const nextAi = mergeAiConnections(data.aiConnections, prev.aiConnections);
+                  const nextUser: AppUser = {
+                    ...prev,
+                    ...data,
+                    aiConnections: nextAi,
+                  };
+                  try {
+                    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(nextUser));
+                  } catch {}
+                  return nextUser;
+                });
+              }
             }
           }
         });
@@ -373,23 +444,46 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Automatically sync active user profile & workspace on startup and in real-time across browsers
+  // Automatically sync active user profile & workspace on startup and in real-time across browsers/devices
   useEffect(() => {
     if (!currentUser?.id) return;
     const uid = currentUser.id;
 
-    // Ensure profile exists in Firestore (fixes accounts created previously without cloud profile)
-    const safeCloudProfile = stripUndefined({
-      id: currentUser.id,
-      name: currentUser.name,
-      hasPassword: Boolean(currentUser.hasPassword),
-      ...(currentUser.passwordHash ? { passwordHash: currentUser.passwordHash } : {}),
-      createdAt: currentUser.createdAt || new Date().toISOString(),
-      aiConnections: normalizeAiConnections(currentUser.aiConnections),
-    });
-    setDoc(doc(db, 'formTemplates', `user_profile__${uid}`), safeCloudProfile, {
-      merge: true,
-    }).catch(() => {});
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'formTemplates', `user_profile__${uid}`));
+        const cloudData = snap.exists() ? (snap.data() as AppUser) : undefined;
+        const mergedAi = mergeAiConnections(cloudData?.aiConnections, currentUser.aiConnections);
+
+        const syncedUser: AppUser = {
+          ...currentUser,
+          ...(cloudData || {}),
+          id: uid,
+          name: cloudData?.name || currentUser.name,
+          aiConnections: mergedAi,
+        };
+
+        setCurrentUser(syncedUser);
+        try {
+          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(syncedUser));
+        } catch {}
+        const reg = loadLocalRegistry();
+        reg[uid] = syncedUser;
+        saveLocalRegistry(reg);
+
+        const safeCloudProfile = stripUndefined({
+          id: syncedUser.id,
+          name: syncedUser.name,
+          hasPassword: Boolean(syncedUser.hasPassword),
+          ...(syncedUser.passwordHash ? { passwordHash: syncedUser.passwordHash } : {}),
+          createdAt: syncedUser.createdAt || new Date().toISOString(),
+          aiConnections: mergedAi,
+        });
+        await setDoc(doc(db, 'formTemplates', `user_profile__${uid}`), safeCloudProfile, {
+          merge: true,
+        });
+      } catch {}
+    })();
 
     migrateLegacyDataToFirstUser(uid);
     syncAllLocalWorkspaceWithCloud(uid);
@@ -427,10 +521,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               existing = {
                 ...existing,
                 ...cloudUser,
-                aiConnections: normalizeAiConnections({
-                  ...(cloudUser.aiConnections || {}),
-                  ...(existing?.aiConnections || {}),
-                }),
+                aiConnections: mergeAiConnections(
+                  cloudUser.aiConnections,
+                  existing?.aiConnections
+                ),
               };
             }
           }
@@ -506,6 +600,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           ...DEFAULT_AI_CONNECTIONS,
           ...(currentUser.aiConnections || {}),
           ...patch,
+          updatedAt: Date.now(),
         },
       };
       persistUser(next);
