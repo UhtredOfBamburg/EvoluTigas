@@ -45,16 +45,24 @@ function sanitizeInlineData(item: any) {
 
 function resolveGeminiCandidateModels(preferredModel?: string): string[] {
   const pref = (preferredModel || '').trim();
-  if (pref === 'gemini-4-argon' || pref === 'gemini-2.5-pro' || pref === 'argon') {
-    return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest'];
-  }
-  if (pref === 'gemini-3.1-flash-lite' || pref === 'gemini-2.5-flash-lite') {
-    return ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
-  }
-  if (pref === 'gemini-3.8-flash' || pref === 'gemini-2.5-flash' || !pref) {
-    return ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'];
-  }
-  return Array.from(new Set([pref, 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash']));
+  const normalized =
+    pref === 'gemini-2.5-pro' || pref === 'argon'
+      ? 'gemini-4-argon'
+      : pref === 'gemini-2.5-flash' || pref === 'gemini-2.0-flash' || !pref
+      ? 'gemini-3.8-flash'
+      : pref === 'gemini-2.5-flash-lite'
+      ? 'gemini-3.1-flash-lite'
+      : pref;
+
+  return Array.from(
+    new Set([
+      normalized,
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-4-argon',
+      'gemini-flash-latest',
+    ])
+  );
 }
 
 async function generateWithGeminiFallback(
@@ -95,11 +103,10 @@ async function generateWithChatGpt(
   images: Array<{ mimeType: string; data: string }>,
   isJsonResponse: boolean
 ): Promise<string> {
-  const pref = (model || '').trim();
-  const candidateModels =
-    !pref || pref === 'gpt-5.6-sol' || pref === 'gpt-5' || pref === 'gpt-4.5-preview'
-      ? ['gpt-4o', 'gpt-4o-mini']
-      : Array.from(new Set([pref, 'gpt-4o', 'gpt-4o-mini']));
+  const pref = (model || '').trim() || 'gpt-5.6-sol';
+  const candidateModels = Array.from(
+    new Set([pref, 'gpt-5.6-sol', 'gpt-5', 'o3', 'gpt-4o', 'gpt-4o-mini'])
+  );
 
   const contentParts: any[] = [];
   for (const img of images) {
@@ -182,24 +189,17 @@ async function generateWithClaude(
   images: Array<{ mimeType: string; data: string }>,
   isJsonResponse: boolean
 ): Promise<string> {
-  const pref = (model || '').trim();
-  const candidateModels =
-    !pref || pref === 'claude-opus-5-5' || pref === 'claude-sonnet-4-5'
-      ? [
-          'claude-sonnet-4-20250514',
-          'claude-3-7-sonnet-latest',
-          'claude-3-5-sonnet-latest',
-          'claude-3-5-haiku-latest',
-        ]
-      : Array.from(
-          new Set([
-            pref,
-            'claude-sonnet-4-20250514',
-            'claude-3-7-sonnet-latest',
-            'claude-3-5-sonnet-latest',
-            'claude-3-5-haiku-latest',
-          ])
-        );
+  const pref = (model || '').trim() || 'claude-opus-5-5';
+  const candidateModels = Array.from(
+    new Set([
+      pref,
+      'claude-opus-5-5',
+      'claude-sonnet-4-5',
+      'claude-3-7-sonnet-latest',
+      'claude-3-5-sonnet-latest',
+      'claude-3-5-haiku-latest',
+    ])
+  );
 
   const contentBlocks: any[] = [];
   for (const img of images) {
@@ -318,7 +318,7 @@ export async function handler(event: any) {
       if (provider === 'chatgpt') {
         const reply = await generateWithChatGpt(
           cleanKey,
-          model || 'gpt-4o',
+          model || 'gpt-5.6-sol',
           'Responda apenas com a palavra: CONECTADO',
           [],
           false
@@ -329,7 +329,7 @@ export async function handler(event: any) {
       if (provider === 'claude') {
         const reply = await generateWithClaude(
           cleanKey,
-          model || 'claude-sonnet-4-20250514',
+          model || 'claude-opus-5-5',
           'Responda apenas com a palavra: CONECTADO',
           [],
           false
@@ -343,7 +343,7 @@ export async function handler(event: any) {
           customGemini,
           'Responda apenas com a palavra: CONECTADO',
           false,
-          model || 'gemini-2.5-flash'
+          model || 'gemini-3.8-flash'
         );
         const text = response.text || 'CONECTADO';
         return jsonResponse(200, { ok: true, provider: 'gemini', sample: text.trim().slice(0, 60) });
@@ -497,7 +497,7 @@ export async function handler(event: any) {
       if (provider === 'chatgpt' && userApiKey) {
         const resultText = await generateWithChatGpt(
           userApiKey,
-          userModel || 'gpt-4o',
+          userModel || 'gpt-5.6-sol',
           promptText,
           sanitizedImages,
           isJsonResponse
@@ -508,7 +508,7 @@ export async function handler(event: any) {
       if (provider === 'claude' && userApiKey) {
         const resultText = await generateWithClaude(
           userApiKey,
-          userModel || 'claude-sonnet-4-20250514',
+          userModel || 'claude-opus-5-5',
           promptText,
           sanitizedImages,
           isJsonResponse

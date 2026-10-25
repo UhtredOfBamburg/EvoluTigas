@@ -85,56 +85,45 @@ export function getBuiltinGeminiApiKey(): string {
 
 function resolveGeminiCandidateModels(preferredModel?: string): string[] {
   const pref = (preferredModel || '').trim();
-  const mapped: string[] = [];
+  const normalized =
+    pref === 'gemini-2.5-pro' || pref === 'argon'
+      ? 'gemini-4-argon'
+      : pref === 'gemini-2.5-flash' || pref === 'gemini-2.0-flash' || !pref
+      ? 'gemini-3.8-flash'
+      : pref === 'gemini-2.5-flash-lite'
+      ? 'gemini-3.1-flash-lite'
+      : pref;
 
-  if (pref === 'gemini-4-argon' || pref === 'gemini-2.5-pro' || pref === 'argon') {
-    mapped.push('gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest');
-  } else if (pref === 'gemini-3.1-flash-lite' || pref === 'gemini-2.5-flash-lite') {
-    mapped.push('gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest');
-  } else if (pref === 'gemini-3.8-flash' || pref === 'gemini-2.5-flash' || !pref) {
-    mapped.push('gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash');
-  } else {
-    mapped.push(pref, 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash');
-  }
-
-  return Array.from(new Set(mapped));
+  return Array.from(
+    new Set([
+      normalized,
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-4-argon',
+      'gemini-flash-latest',
+    ])
+  );
 }
 
 function resolveChatGptCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim();
-  const mapped: string[] = [];
-
-  if (!pref || pref === 'gpt-5.6-sol' || pref === 'gpt-5' || pref === 'gpt-4.5-preview') {
-    mapped.push('gpt-4o', 'gpt-4o-mini');
-  } else {
-    mapped.push(pref, 'gpt-4o', 'gpt-4o-mini');
-  }
-
-  return Array.from(new Set(mapped));
+  const pref = (preferredModel || '').trim() || 'gpt-5.6-sol';
+  return Array.from(
+    new Set([pref, 'gpt-5.6-sol', 'gpt-5', 'o3', 'gpt-4o', 'gpt-4o-mini'])
+  );
 }
 
 function resolveClaudeCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim();
-  const mapped: string[] = [];
-
-  if (!pref || pref === 'claude-opus-5-5' || pref === 'claude-sonnet-4-5') {
-    mapped.push(
-      'claude-sonnet-4-20250514',
-      'claude-3-7-sonnet-latest',
-      'claude-3-5-sonnet-latest',
-      'claude-3-5-haiku-latest'
-    );
-  } else {
-    mapped.push(
+  const pref = (preferredModel || '').trim() || 'claude-opus-5-5';
+  return Array.from(
+    new Set([
       pref,
-      'claude-sonnet-4-20250514',
+      'claude-opus-5-5',
+      'claude-sonnet-4-5',
       'claude-3-7-sonnet-latest',
       'claude-3-5-sonnet-latest',
-      'claude-3-5-haiku-latest'
-    );
-  }
-
-  return Array.from(new Set(mapped));
+      'claude-3-5-haiku-latest',
+    ])
+  );
 }
 
 export async function generateWithGeminiClient(
@@ -157,7 +146,7 @@ export async function generateWithGeminiClient(
         ]
       : promptText;
 
-  let lastError: any = null;
+  let firstError: any = null;
 
   for (const modelName of candidates) {
     const baseConfig: Record<string, any> = {
@@ -186,12 +175,16 @@ export async function generateWithGeminiClient(
         return resultText;
       }
     } catch (err: any) {
-      lastError = err;
-      console.warn(`[AI Client] Gemini model "${modelName}" failed:`, err?.message || err);
+      if (!firstError) firstError = err;
+      const msg = String(err?.message || err || '');
+      console.warn(`[AI Client] Gemini model "${modelName}" failed:`, msg);
+      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        break;
+      }
     }
   }
 
-  throw lastError || new Error('Não foi possível gerar resposta com o Google Gemini.');
+  throw firstError || new Error('Não foi possível gerar resposta com o Google Gemini.');
 }
 
 export async function generateWithChatGptClient(

@@ -13,9 +13,10 @@ import {
 } from "./server/prompts";
 
 const MODEL_CANDIDATES = [
-  "gemini-2.5-flash",
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-4-argon",
   "gemini-flash-latest",
-  "gemini-2.0-flash",
 ];
 
 const JSON_RESPONSE_TYPES = new Set([
@@ -74,12 +75,12 @@ async function generateWithGeminiFallback(
 ) {
   let lastError: any = null;
   const normalizedPreferred =
-    preferredModel === "gemini-2.5-pro" || preferredModel === "argon" || preferredModel === "gemini-4-argon"
-      ? "gemini-2.5-pro"
-      : preferredModel === "gemini-2.5-flash" || preferredModel === "gemini-3.8-flash"
-      ? "gemini-2.5-flash"
-      : preferredModel === "gemini-3.1-flash-lite"
-      ? "gemini-2.5-flash-lite"
+    preferredModel === "gemini-2.5-pro" || preferredModel === "argon"
+      ? "gemini-4-argon"
+      : preferredModel === "gemini-2.5-flash" || preferredModel === "gemini-2.0-flash"
+      ? "gemini-3.8-flash"
+      : preferredModel === "gemini-2.5-flash-lite"
+      ? "gemini-3.1-flash-lite"
       : preferredModel;
 
   let candidates: string[];
