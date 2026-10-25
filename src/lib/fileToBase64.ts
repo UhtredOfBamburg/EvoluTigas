@@ -4,7 +4,7 @@
  * Immediately frees the <canvas> backing memory after encoding so iOS Safari
  * never hits its 224MB canvas memory limit when processing multiple photos.
  */
-async function compressImageFile(file: File, maxDim = 1400, quality = 0.78): Promise<{ mimeType: string; data: string }> {
+async function compressImageFile(file: File, maxDim = 1200, quality = 0.72): Promise<{ mimeType: string; data: string }> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();

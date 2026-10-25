@@ -31,7 +31,7 @@ export default function TranscritorExames() {
     setMessages(prev => {
       const newMessages = [...prev];
       const last = newMessages[newMessages.length - 1];
-      if (last && last.role === 'assistant' && last.content.includes('...')) {
+      if (last && last.role === 'assistant') {
         newMessages[newMessages.length - 1] = { ...last, content };
       } else {
         newMessages.push({ role: 'assistant', content });

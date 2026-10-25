@@ -15,7 +15,40 @@ export const SHARED_BUILTIN_KEY_STORAGE = 'evolutigas_global_builtin_gemini_key_
 
 let lastHealthyGeminiModel: string | null = null;
 let lastHealthyGeminiTs = 0;
-const HEALTHY_CACHE_TTL_MS = 3 * 60 * 1000;
+const HEALTHY_CACHE_TTL_MS = 10 * 60 * 1000;
+const BLOCKED_MODEL_TTL_MS = 15 * 60 * 1000;
+const blockedModelsMap = new Map<string, number>();
+
+function isModelTemporarilyBlocked(model: string): boolean {
+  const ts = blockedModelsMap.get(model);
+  if (!ts) return false;
+  if (Date.now() - ts > BLOCKED_MODEL_TTL_MS) {
+    blockedModelsMap.delete(model);
+    return false;
+  }
+  return true;
+}
+
+function markModelTemporarilyBlocked(model: string) {
+  blockedModelsMap.set(model, Date.now());
+}
+
+function withModelTimeout<T>(promise: Promise<T>, ms: number, modelName: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout after ${ms}ms on ${modelName}`));
+    }, ms);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 export function reportClientErrorToCloud(context: string, err: unknown, extra?: Record<string, any>) {
   try {
@@ -126,20 +159,24 @@ function resolveGeminiCandidateModels(preferredModel?: string): string[] {
   const isHealthyCacheValid =
     lastHealthyGeminiModel && Date.now() - lastHealthyGeminiTs < HEALTHY_CACHE_TTL_MS;
 
-  const list = [
-    ...(isHealthyCacheValid && lastHealthyGeminiModel ? [lastHealthyGeminiModel] : []),
-    normalized,
-    'gemini-3.8-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-latest',
-    'gemini-4-argon',
-  ];
+  const rawList = Array.from(
+    new Set([
+      ...(isHealthyCacheValid && lastHealthyGeminiModel ? [lastHealthyGeminiModel] : []),
+      normalized,
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
+      'gemini-4-argon',
+    ])
+  );
 
-  return Array.from(new Set(list));
+  const healthy = rawList.filter((m) => !isModelTemporarilyBlocked(m));
+  const blocked = rawList.filter((m) => isModelTemporarilyBlocked(m));
+  return [...healthy, ...blocked];
 }
 
 function resolveChatGptCandidateModels(preferredModel?: string): string[] {
@@ -194,11 +231,15 @@ export async function generateWithGeminiClient(
     }
 
     try {
-      const response = await aiClient.models.generateContent({
-        model: modelName,
-        contents,
-        config: baseConfig,
-      });
+      const response = await withModelTimeout(
+        aiClient.models.generateContent({
+          model: modelName,
+          contents,
+          config: baseConfig,
+        }),
+        22000,
+        modelName
+      );
 
       const resultText =
         response.text ||
@@ -215,6 +256,7 @@ export async function generateWithGeminiClient(
       }
     } catch (err: any) {
       if (!firstError) firstError = err;
+      markModelTemporarilyBlocked(modelName);
       const msg = String(err?.message || err || '');
       console.warn(`[AI Client] Gemini model "${modelName}" failed:`, msg);
       if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
