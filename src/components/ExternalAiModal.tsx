@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
+import { testAiProviderDirect } from '@/lib/aiClient';
 
 function getDefaultShareUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -109,6 +110,8 @@ export function GlobalModals() {
     setIsShareModalOpen,
     isAiModalOpen,
     setIsAiModalOpen,
+    sharedBuiltinKey,
+    updateSharedBuiltinKey,
   } = useUser();
   const { toast } = useToast();
 
@@ -116,6 +119,8 @@ export function GlobalModals() {
   const [customModelMode, setCustomModelMode] = useState<Record<string, boolean>>({});
   const [testingProvider, setTestingProvider] = useState<AiChatProvider | null>(null);
   const [testError, setTestError] = useState<string>('');
+  const [sharedKeyInput, setSharedKeyInput] = useState<string>('');
+  const [showSharedKeyConfig, setShowSharedKeyConfig] = useState<boolean>(false);
   const [copiedShareLink, setCopiedShareLink] = useState(false);
   const [copiedWhatsappMsg, setCopiedWhatsappMsg] = useState(false);
   const [shareUrl, setShareUrl] = useState<string>(() => getDefaultShareUrl());
@@ -124,6 +129,8 @@ export function GlobalModals() {
     if (currentUser && isAiModalOpen) {
       const conn = { ...DEFAULT_AI_CONNECTIONS, ...(currentUser.aiConnections || {}) };
       setFormState(conn);
+      setSharedKeyInput(sharedBuiltinKey || '');
+      setShowSharedKeyConfig(!sharedBuiltinKey);
       setTestError('');
       setCustomModelMode({
         claude: Boolean(
@@ -137,7 +144,7 @@ export function GlobalModals() {
         ),
       });
     }
-  }, [currentUser, isAiModalOpen]);
+  }, [currentUser, isAiModalOpen, sharedBuiltinKey]);
 
   const activeExternal =
     formState.activeProvider !== 'builtin' ? formState.activeProvider : null;
@@ -157,6 +164,39 @@ export function GlobalModals() {
   const isConnectedFor = (p: 'claude' | 'chatgpt' | 'gemini') =>
     p === 'claude' ? formState.claudeConnected : p === 'chatgpt' ? formState.chatgptConnected : formState.geminiConnected;
 
+  const handleTestAndSaveSharedBuiltin = async () => {
+    setTestError('');
+    const clean = (sharedKeyInput || '').trim();
+    if (!clean) {
+      setTestError('Cole uma chave gratuita do Google AI Studio (AIzaSy...) para ativar a IA Integrada.');
+      return;
+    }
+
+    setTestingProvider('builtin');
+    try {
+      const result = await testAiProviderDirect('gemini', clean, formState.builtinModel || 'gemini-3.8-flash');
+      if (!result.ok) {
+        setTestError(result.error || 'Chave inválida. Verifique se copiou a chave completa do Google AI Studio.');
+        return;
+      }
+
+      await updateSharedBuiltinKey(clean);
+      const nextState: AiConnectionsState = {
+        ...formState,
+        activeProvider: 'builtin',
+      };
+      setFormState(nextState);
+      await updateAiConnections(nextState);
+      setShowSharedKeyConfig(false);
+      toast('IA Integrada (20 créditos grátis/dia) ativada para toda a turma!', 'success');
+      setIsAiModalOpen(false);
+    } catch {
+      setTestError('Erro ao validar a chave. Verifique sua conexão e tente novamente.');
+    } finally {
+      setTestingProvider(null);
+    }
+  };
+
   const handleTestAndConnect = async (provider: 'claude' | 'chatgpt' | 'gemini') => {
     setTestError('');
     const key = getKeyFor(provider);
@@ -169,13 +209,8 @@ export function GlobalModals() {
 
     setTestingProvider(provider);
     try {
-      const res = await fetch('/api/test-ai-provider', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: key.trim(), model }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
+      const data = await testAiProviderDirect(provider, key.trim(), model);
+      if (!data.ok) {
         setTestError(data.error || `Não foi possível conectar ao ${getProviderLabel(provider)}.`);
         return;
       }
@@ -276,13 +311,18 @@ export function GlobalModals() {
                     <div className="flex items-center gap-2">
                       <Zap className="w-4 h-4 text-teal-600" />
                       <h4 className="font-bold text-sm text-teal-950">IA Integrada do EvoluTigas (Gratuita)</h4>
+                      {sharedBuiltinKey && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          <CheckCircle2 className="w-3 h-3" /> Ativa
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-100 text-teal-800">
                       {remainingToday} de {dailyLimit} usos hoje
                     </span>
                   </div>
                   <p className="text-xs text-teal-900/80 leading-relaxed">
-                    Pronta para uso imediato sem precisar de chave. Cada colega recebe <strong>{dailyLimit} gerações gratuitas por dia</strong> e já pode escolher entre o <strong>Gemini 3.8 Flash</strong> e o <strong>Gemini Argon</strong> abaixo:
+                    Pronta para uso imediato. Cada colega recebe <strong>{dailyLimit} gerações gratuitas por dia</strong> e já pode escolher entre o <strong>Gemini 3.8 Flash</strong> e o <strong>Gemini Argon</strong> abaixo:
                   </p>
                   <div className="space-y-1.5 pt-1">
                     <Label className="text-xs font-semibold text-teal-950">Versão do Modelo da IA Integrada</Label>
@@ -297,6 +337,66 @@ export function GlobalModals() {
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="pt-2 border-t border-teal-200/70 space-y-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowSharedKeyConfig((v) => !v)}
+                        className="text-xs font-semibold text-teal-800 hover:text-teal-950 underline flex items-center gap-1"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-teal-700" />
+                        {sharedBuiltinKey
+                          ? 'Atualizar chave da cota gratuita da turma (20/dia)'
+                          : 'Ativar chave gratuita da turma (20 usos/dia no Netlify)'}
+                      </button>
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 underline"
+                      >
+                        Gerar chave grátis no Google AI Studio <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    {showSharedKeyConfig && (
+                      <div className="p-3 rounded-lg bg-white/90 border border-teal-200 space-y-2">
+                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                          Cole abaixo uma chave gratuita do Google AI Studio (<code>AIzaSy...</code>) para liberar os{' '}
+                          <strong>{dailyLimit} créditos diários gratuitos</strong> automaticamente para a turma no Netlify:
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            type="password"
+                            placeholder="AIzaSy..."
+                            value={sharedKeyInput}
+                            onChange={(e) => setSharedKeyInput(e.target.value)}
+                            className="h-9 text-xs font-mono bg-white flex-1"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={testingProvider === 'builtin'}
+                            onClick={handleTestAndSaveSharedBuiltin}
+                            className="bg-teal-600 hover:bg-teal-700 text-white text-xs h-9 shrink-0"
+                          >
+                            {testingProvider === 'builtin' ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                Testando...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-3.5 h-3.5 mr-1.5" />
+                                Testar e Ativar Cota Gratuita
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

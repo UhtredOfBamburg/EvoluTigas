@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useToast } from '@/hooks/useToast';
 import { useUser, getActiveAiConnectionsFromStorage } from '@/contexts/UserContext';
+import { executeAiGeneration, ExecuteAiPayload } from '@/lib/aiClient';
 
 export type AiGenerateType =
   | 'evolucao'
@@ -36,11 +37,6 @@ export interface GenerateOptions {
   formFields?: Array<{ id: string; label: string; type: string }>;
   parseJson?: boolean;
   errorMessage?: string;
-}
-
-interface GenerateResult<T = string> {
-  text: T;
-  provider?: string;
 }
 
 function parseAiResultText<T>(rawText: string, parseJson?: boolean): T {
@@ -127,7 +123,7 @@ export function useAiGenerate() {
 
       setLoading(true);
       try {
-        const payload: Record<string, unknown> = {
+        const payload: ExecuteAiPayload = {
           type: options.type,
           aiProviderConfig,
         };
@@ -140,49 +136,13 @@ export function useAiGenerate() {
         if (options.alreadyFound !== undefined) payload.alreadyFound = options.alreadyFound;
         if (options.formFields !== undefined) payload.formFields = options.formFields;
 
-        const response = await fetch('/api/generate-evolucao', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        const data = await executeAiGeneration(payload);
 
-        const rawResponseText = await response.text();
-        let parsedBody: any = null;
-        if (rawResponseText) {
-          try {
-            parsedBody = JSON.parse(rawResponseText);
-          } catch {
-            parsedBody = null;
-          }
-        }
-
-        if (!response.ok) {
-          const serverErrorMsg =
-            parsedBody && typeof parsedBody.error === 'string' ? parsedBody.error : '';
-
-          if (response.status === 413) {
-            throw new Error(
-              'O arquivo enviado é muito grande. Tente enviar arquivos menores ou em menor quantidade.'
-            );
-          }
-          if (response.status === 502 || response.status === 503 || response.status === 504) {
-            throw new Error(
-              'O servidor demorou para responder na rede móvel. Tente novamente ou envie menos arquivos por vez.'
-            );
-          }
-          if (serverErrorMsg) {
-            throw new Error(serverErrorMsg);
-          }
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-
-        if (!parsedBody || typeof parsedBody.text !== 'string' || !parsedBody.text.trim()) {
+        if (!data || typeof data.text !== 'string' || !data.text.trim()) {
           throw new Error(
             'Não foi possível concluir a leitura da resposta. Verifique sua conexão e tente novamente.'
           );
         }
-
-        const data: GenerateResult = parsedBody;
 
         if (activeProvider === 'builtin') {
           incrementDailyUsage();
@@ -198,6 +158,16 @@ export function useAiGenerate() {
       } catch (err: any) {
         console.error('useAiGenerate error:', err);
         const rawMsg = err && typeof err.message === 'string' ? err.message : '';
+
+        if (rawMsg.includes('MISSING_AI_KEY') || rawMsg.includes('Chave de IA não configurada')) {
+          toast(
+            'Conecte uma chave de IA (Gemini gratuito, Claude ou ChatGPT) para ativar as funções de IA.',
+            'info'
+          );
+          setIsAiModalOpen(true);
+          return null;
+        }
+
         const isBrowserFetchOrSyntaxErr =
           !rawMsg ||
           rawMsg.startsWith('Request failed with status') ||

@@ -5,6 +5,7 @@ import {
   syncAllLocalWorkspaceWithCloud,
   subscribeWorkspaceFromCloud,
 } from '@/hooks/useLocalStorage';
+import { SHARED_BUILTIN_KEY_STORAGE, getBuiltinGeminiApiKey } from '@/lib/aiClient';
 
 export type AiChatProvider = 'builtin' | 'claude' | 'chatgpt' | 'gemini';
 
@@ -80,6 +81,8 @@ interface UserContextValue {
   isAiModalOpen: boolean;
   setIsAiModalOpen: (open: boolean) => void;
   syncWorkspaceKeyToCloud: (key: string, value: unknown) => void;
+  sharedBuiltinKey: string;
+  updateSharedBuiltinKey: (key: string) => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -217,6 +220,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [sharedBuiltinKey, setSharedBuiltinKey] = useState<string>(() => getBuiltinGeminiApiKey());
 
   useEffect(() => {
     if (!currentUser) {
@@ -244,7 +248,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentUser]);
 
-  // Real-time sync of knownUsers from Firestore
+  // Real-time sync of knownUsers & shared builtin key from Firestore
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'formTemplates'),
@@ -252,7 +256,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const reg = loadLocalRegistry();
         let changed = false;
         snap.forEach((docSnap) => {
-          if (docSnap.id.startsWith('user_profile__')) {
+          if (docSnap.id === 'system_shared_ai_config') {
+            const cfg = docSnap.data() as { geminiKey?: string } | undefined;
+            if (cfg && typeof cfg.geminiKey === 'string') {
+              const clean = cfg.geminiKey.trim();
+              try {
+                if (clean) {
+                  localStorage.setItem(SHARED_BUILTIN_KEY_STORAGE, clean);
+                } else {
+                  localStorage.removeItem(SHARED_BUILTIN_KEY_STORAGE);
+                }
+              } catch {}
+              setSharedBuiltinKey(clean || getBuiltinGeminiApiKey());
+            }
+          } else if (docSnap.id.startsWith('user_profile__')) {
             const data = docSnap.data() as AppUser;
             if (data && data.id && data.name) {
               const localAi = reg[data.id]?.aiConnections || {};
@@ -276,6 +293,30 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       () => {}
     );
     return () => unsubscribe();
+  }, []);
+
+  const updateSharedBuiltinKey = useCallback(async (key: string) => {
+    const clean = (key || '').trim();
+    try {
+      if (clean) {
+        localStorage.setItem(SHARED_BUILTIN_KEY_STORAGE, clean);
+      } else {
+        localStorage.removeItem(SHARED_BUILTIN_KEY_STORAGE);
+      }
+    } catch {}
+    setSharedBuiltinKey(clean || getBuiltinGeminiApiKey());
+    try {
+      await setDoc(
+        doc(db, 'formTemplates', 'system_shared_ai_config'),
+        {
+          geminiKey: clean,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('Failed to sync shared AI key to Firestore:', err);
+    }
   }, []);
 
   const syncWorkspaceKeyToCloud = useCallback(
@@ -492,6 +533,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         isAiModalOpen,
         setIsAiModalOpen,
         syncWorkspaceKeyToCloud,
+        sharedBuiltinKey,
+        updateSharedBuiltinKey,
       }}
     >
       {children}
