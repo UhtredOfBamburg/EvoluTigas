@@ -11,7 +11,7 @@ type Message = { role: 'user' | 'assistant', content: string, type?: 'image' | '
 interface SavedSession { id: string; name: string; date: string; messages: Message[] }
 interface SavedFormat { id: string; label: string; format: string }
 
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 4;
 
 export default function TranscritorExames() {
   const [isSync, setIsSync] = useState(true);
@@ -46,6 +46,9 @@ export default function TranscritorExames() {
       const transcribedParts: string[] = [];
 
       for (let b = 0; b < totalBatches; b++) {
+        if (b > 0) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
         const chunk = inlineDatas.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
         replaceLastLoadingMessage(
           transcribedParts.length > 0
@@ -53,13 +56,24 @@ export default function TranscritorExames() {
             : `Transcrevendo exames (lote ${b + 1} de ${totalBatches})...`
         );
 
-        const partResult = await generate<string>({
+        let partResult = await generate<string>({
           type: 'transcritor-exames',
           customPrompt: text,
           inlineDatas: chunk,
           outputFormat,
           errorMessage: `Erro ao transcrever lote ${b + 1} de ${totalBatches}.`,
         });
+
+        if (!partResult || !partResult.trim()) {
+          await new Promise((r) => setTimeout(r, 1200));
+          partResult = await generate<string>({
+            type: 'transcritor-exames',
+            customPrompt: text,
+            inlineDatas: chunk,
+            outputFormat,
+            errorMessage: `Erro ao transcrever lote ${b + 1} de ${totalBatches}.`,
+          });
+        }
 
         if (partResult && partResult.trim()) {
           transcribedParts.push(partResult.trim());

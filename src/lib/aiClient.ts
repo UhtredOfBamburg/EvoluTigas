@@ -1,4 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from './firebase';
 import {
   ALL_KNOWN_TYPES,
   MULTIMODAL_TYPES,
@@ -10,6 +12,33 @@ import {
 } from '../../server/prompts';
 
 export const SHARED_BUILTIN_KEY_STORAGE = 'evolutigas_global_builtin_gemini_key_v1';
+
+let lastHealthyGeminiModel: string | null = null;
+let lastHealthyGeminiTs = 0;
+const HEALTHY_CACHE_TTL_MS = 3 * 60 * 1000;
+
+export function reportClientErrorToCloud(context: string, err: unknown, extra?: Record<string, any>) {
+  try {
+    const msg = err instanceof Error ? err.message : String(err || '');
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
+    setDoc(
+      doc(db, 'formTemplates', 'system_error_telemetry'),
+      {
+        lastUpdated: new Date().toISOString(),
+        lastError: {
+          timestamp: new Date().toISOString(),
+          context,
+          message: msg.slice(0, 600),
+          userAgent: ua.slice(0, 200),
+          ...(extra || {}),
+        },
+      },
+      { merge: true }
+    ).catch(() => {});
+  } catch {
+    // ignore telemetry errors
+  }
+}
 
 const JSON_RESPONSE_TYPES = new Set([
   'detectar-campos-pdf',
@@ -94,15 +123,23 @@ function resolveGeminiCandidateModels(preferredModel?: string): string[] {
       ? 'gemini-3.1-flash-lite'
       : pref;
 
-  return Array.from(
-    new Set([
-      normalized,
-      'gemini-3.8-flash',
-      'gemini-3.1-flash-lite',
-      'gemini-4-argon',
-      'gemini-flash-latest',
-    ])
-  );
+  const isHealthyCacheValid =
+    lastHealthyGeminiModel && Date.now() - lastHealthyGeminiTs < HEALTHY_CACHE_TTL_MS;
+
+  const list = [
+    ...(isHealthyCacheValid && lastHealthyGeminiModel ? [lastHealthyGeminiModel] : []),
+    normalized,
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest',
+    'gemini-4-argon',
+  ];
+
+  return Array.from(new Set(list));
 }
 
 function resolveChatGptCandidateModels(preferredModel?: string): string[] {
@@ -172,6 +209,8 @@ export async function generateWithGeminiClient(
         '';
 
       if (resultText.trim()) {
+        lastHealthyGeminiModel = modelName;
+        lastHealthyGeminiTs = Date.now();
         return resultText;
       }
     } catch (err: any) {
@@ -184,6 +223,7 @@ export async function generateWithGeminiClient(
     }
   }
 
+  reportClientErrorToCloud('generateWithGeminiClient', firstError, { preferredModel });
   throw firstError || new Error('Não foi possível gerar resposta com o Google Gemini.');
 }
 
