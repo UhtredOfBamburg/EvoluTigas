@@ -141,3 +141,71 @@ html.night-shift .hover\:bg-slate-100:hover {
   padding-top: 0.5rem !important;
   padding-bottom: 0.5rem !important;
 }
+
+/* Portal de Impressão Direta de PDF (Evita página em branco no Chrome, Safari e iOS) */
+@media screen {
+  #pdf-print-portal {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+}
+
+@media print {
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body.has-pdf-print-portal #root {
+    display: none !important;
+  }
+
+  body.has-pdf-print-portal #pdf-print-portal {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body.has-pdf-print-portal #pdf-print-portal .pdf-print-page {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  body.has-pdf-print-portal #pdf-print-portal .pdf-print-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  body.has-pdf-print-portal #pdf-print-portal .pdf-print-page img {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: 99vh !important;
+    object-fit: contain !important;
+    margin: 0 auto !important;
+  }
+}
+

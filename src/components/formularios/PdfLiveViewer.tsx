@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ZoomIn,
   ZoomOut,
@@ -18,6 +19,7 @@ interface PdfLiveViewerProps {
   pdfBytes: Uint8Array | null;
   title?: string;
   onDownload?: () => void;
+  printTriggerRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 interface PageImage {
@@ -27,19 +29,52 @@ interface PageImage {
   height: number;
 }
 
+function waitForImagesDecoded(imgs: HTMLImageElement[]): Promise<void> {
+  return Promise.all(
+    imgs.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          const finish = () => {
+            if (typeof img.decode === 'function') {
+              img
+                .decode()
+                .then(() => resolve())
+                .catch(() => resolve());
+            } else {
+              resolve();
+            }
+          };
+          if (img.complete && img.naturalWidth > 0) {
+            finish();
+          } else {
+            img.onload = finish;
+            img.onerror = () => resolve();
+          }
+        })
+    )
+  ).then(() => undefined);
+}
+
 /**
  * Renders the real generated PDF bytes (from pdf-lib) using pdf.js inside a
  * universal PDF viewer frame (#323639 toolbar + #525659 backdrop).
  * Compatible with Chrome, Safari (macOS), and iOS/iPadOS (Safari & Chrome) inside sandboxed iframes.
  */
-export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }: PdfLiveViewerProps) {
+export function PdfLiveViewer({
+  pdfBytes,
+  title = 'Documento.pdf',
+  onDownload,
+  printTriggerRef,
+}: PdfLiveViewerProps) {
   const [pages, setPages] = useState<PageImage[]>([]);
   const [isRendering, setIsRendering] = useState(false);
+  const [isPreparingPrint, setIsPreparingPrint] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(100);
   const [rotation, setRotation] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const printPortalRef = useRef<HTMLDivElement>(null);
   const isIOS = isIOSDevice();
 
   useEffect(() => {
@@ -62,7 +97,7 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
           if (cancelled) return;
 
           const unscaled = page.getViewport({ scale: 1, rotation });
-          const targetScale = getSafeCanvasScale(unscaled.width, unscaled.height, isIOS ? 1.5 : 1.75);
+          const targetScale = getSafeCanvasScale(unscaled.width, unscaled.height, isIOS ? 1.65 : 2.1);
           const viewport = page.getViewport({ scale: targetScale, rotation });
 
           const canvas = document.createElement('canvas');
@@ -81,7 +116,7 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
             return;
           }
 
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
           // Free iOS WebKit canvas backing memory immediately
           canvas.width = 0;
           canvas.height = 0;
@@ -122,34 +157,65 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
     };
   }, [pdfBytes, rotation, isIOS]);
 
-  const handlePrint = () => {
+  // Keep body print portal class and @page orientation synchronized so both direct button print and Ctrl+P work
+  useEffect(() => {
+    const hasPages = pages.length > 0;
+    document.body.classList.toggle('has-pdf-print-portal', hasPages);
+
+    let styleEl = document.getElementById('evolutigas-print-page-rule') as HTMLStyleElement | null;
+    if (hasPages) {
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'evolutigas-print-page-rule';
+        document.head.appendChild(styleEl);
+      }
+      const isLandscape = pages[0].width > pages[0].height;
+      styleEl.textContent = `@page { size: ${isLandscape ? 'A4 landscape' : 'A4 portrait'}; margin: 0mm; }`;
+    }
+
+    return () => {
+      document.body.classList.remove('has-pdf-print-portal');
+    };
+  }, [pages]);
+
+  const handlePrint = useCallback(async () => {
     if (pages.length === 0) {
       onDownload?.();
       return;
     }
 
-    // Use a hidden iframe first (works in Safari macOS & iOS AirPrint without popup blocker issues)
+    setIsPreparingPrint(true);
     try {
+      // Ensure portal images in parent document are decoded too (for Safari/iOS or parent window fallback)
+      if (printPortalRef.current) {
+        const portalImgs = Array.from(printPortalRef.current.querySelectorAll('img'));
+        await waitForImagesDecoded(portalImgs);
+      }
+
+      const isLandscape = pages[0].width > pages[0].height;
       const existingFrame = document.getElementById('pdf-print-iframe');
       if (existingFrame) existingFrame.remove();
 
+      // IMPORTANT: Do NOT use width:1px / height:1px / opacity:0 — Chrome & Safari skip painting 0-opacity/1px iframes!
       const iframe = document.createElement('iframe');
       iframe.id = 'pdf-print-iframe';
       iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '1px';
-      iframe.style.height = '1px';
+      iframe.style.left = '-10000px';
+      iframe.style.top = '0';
+      iframe.style.width = isLandscape ? '1123px' : '794px';
+      iframe.style.height = isLandscape ? '794px' : '1123px';
       iframe.style.border = '0';
-      iframe.style.opacity = '0';
+      iframe.style.opacity = '1';
+      iframe.style.visibility = 'visible';
       iframe.style.pointerEvents = 'none';
+      iframe.style.zIndex = '-1';
       document.body.appendChild(iframe);
 
       const imgsHtml = pages
         .map(
           (p) =>
-            `<div class="page">
-               <img src="${p.dataUrl}" />
+            `<div class="print-page">
+               <img src="${p.dataUrl}" alt="Página ${p.pageNumber}" />
              </div>`
         )
         .join('');
@@ -157,40 +223,87 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
       const doc = iframe.contentWindow?.document;
       if (doc && iframe.contentWindow) {
         doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>${title}</title>
-              <style>
-                @page { size: A4; margin: 0; }
-                html, body { margin: 0; padding: 0; background: #fff; }
-                .page { page-break-after: always; display: flex; justify-content: center; align-items: center; width: 100vw; height: 100vh; overflow: hidden; }
-                .page:last-child { page-break-after: auto; }
-                img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-              </style>
-            </head>
-            <body>${imgsHtml}</body>
-          </html>
-        `);
+        doc.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${title}</title>
+    <style>
+      @page {
+        size: ${isLandscape ? 'A4 landscape' : 'A4 portrait'};
+        margin: 0mm !important;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100%;
+        background: #ffffff !important;
+      }
+      .print-page {
+        display: block;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        page-break-after: always;
+        break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .print-page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      .print-page img {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-height: 99vh;
+        object-fit: contain;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>${imgsHtml}</body>
+</html>`);
         doc.close();
 
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch {
-            onDownload?.();
-          }
-        }, 350);
+        const iframeImgs = Array.from(doc.querySelectorAll('img'));
+        await waitForImagesDecoded(iframeImgs);
+
+        // Wait 2 animation frames so Blink/WebKit commits the decoded bitmap to the print layer
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => r()))
+        );
+
+        setIsPreparingPrint(false);
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
         return;
       }
-    } catch {
-      // Fallback to download/share if iframe printing is restricted
+    } catch (err) {
+      console.warn('Iframe print fallback to window.print():', err);
+    } finally {
+      setIsPreparingPrint(false);
     }
 
-    onDownload?.();
-  };
+    // Fallback to parent window print (which uses #pdf-print-portal via @media print)
+    try {
+      window.print();
+    } catch {
+      onDownload?.();
+    }
+  }, [pages, title, onDownload]);
+
+  useEffect(() => {
+    if (printTriggerRef) {
+      printTriggerRef.current = handlePrint;
+    }
+  }, [printTriggerRef, handlePrint]);
 
   const handleOpenBlobInNewTab = () => {
     if (!pdfBytes) return;
@@ -221,6 +334,19 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
 
   return (
     <div className="flex flex-col w-full h-full bg-[#525659] text-white select-none overflow-hidden rounded-xl">
+      {/* Hidden Print Portal in document.body so window.print() / Ctrl+P also prints the exact PDF pages */}
+      {typeof document !== 'undefined' &&
+        pages.length > 0 &&
+        createPortal(
+          <div id="pdf-print-portal" ref={printPortalRef} aria-hidden="true">
+            {pages.map((p) => (
+              <div key={p.pageNumber} className="pdf-print-page">
+                <img src={p.dataUrl} alt={`Página ${p.pageNumber}`} />
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
       {/* Universal PDF Viewer Top Toolbar (Chrome / Safari / iOS compatible) */}
       <div className="min-h-11 bg-[#323639] px-2.5 sm:px-3 py-1.5 flex items-center justify-between gap-2 border-b border-black/30 shadow-xs shrink-0 z-10 flex-wrap">
         {/* Left: Document title */}
@@ -313,10 +439,15 @@ export function PdfLiveViewer({ pdfBytes, title = 'Documento.pdf', onDownload }:
           <button
             type="button"
             onClick={handlePrint}
-            className="p-1.5 rounded hover:bg-white/10 text-slate-200 transition-colors"
+            disabled={isPreparingPrint}
+            className="p-1.5 rounded hover:bg-white/10 text-slate-200 transition-colors disabled:opacity-50"
             title="Imprimir PDF"
           >
-            <Printer className="w-3.5 h-3.5" />
+            {isPreparingPrint ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" />
+            ) : (
+              <Printer className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>

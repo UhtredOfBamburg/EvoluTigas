@@ -135,6 +135,77 @@ export function isReceitaTemplate(template?: FormTemplate | null): boolean {
 }
 
 /**
+ * Identifies whether a template is a "Receita de Controle Especial" (which requires 2 filled copies/vias).
+ */
+export function isControleEspecialTemplate(template?: FormTemplate | null): boolean {
+  if (!template) return false;
+  const norm = `${template.id || ''} ${template.name || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (
+    norm.includes('controle') ||
+    norm.includes('especial') ||
+    norm.includes('notifica') ||
+    norm.includes('azul') ||
+    norm.includes('amarela') ||
+    norm.includes('duas vias') ||
+    norm.includes('2 vias') ||
+    norm.includes('antimicrobiano') ||
+    norm.includes('psicotrop') ||
+    norm.includes('retencao')
+  ) {
+    return true;
+  }
+
+  if (norm.includes('simples') || norm.includes('exame')) {
+    return false;
+  }
+
+  // If it's a landscape prescription that already has mirrored fields mapped on both halves (x < 0.48 and x >= 0.48)
+  const firstPage = template.pages?.[0];
+  const isLandscape = firstPage ? firstPage.widthPts > firstPage.heightPts : false;
+  if (isReceitaTemplate(template) && isLandscape) {
+    const hasLeftField = (template.fields || []).some((f) => f.xNorm < 0.48);
+    const hasRightField = (template.fields || []).some((f) => f.xNorm >= 0.48);
+    if (hasLeftField && hasRightField) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Identifies whether a template is an Exam Request ("Pedido de Exames" / "Solicitação de Exames").
+ */
+export function isExamFormTemplate(template?: FormTemplate | null): boolean {
+  if (!template) return false;
+  if (template.category === 'exames' || template.id === 'pedido_exames') return true;
+  const norm = `${template.id || ''} ${template.name || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (norm.includes('exame') || norm.includes('sadt') || norm.includes('laborat')) {
+    return true;
+  }
+  return (template.fields || []).some((f) => isRequestedExamsField(f, template));
+}
+
+/**
+ * Identifies templates that should be printed on half an A4 sheet (like Receita de Controle Especial,
+ * but with only the 1st half filled and the 2nd half left with blank information):
+ * - Receita Simples
+ * - Pedido de Exames
+ */
+export function isHalfSheetSingleViaTemplate(template?: FormTemplate | null): boolean {
+  if (!template) return false;
+  if (isControleEspecialTemplate(template)) return false;
+  return isReceitaTemplate(template) || isExamFormTemplate(template);
+}
+
+/**
  * Ensures that any Receita template has a "Data de Solicitação" field so the user
  * always has the date option available on prescriptions.
  */
@@ -346,43 +417,144 @@ export function formatMedicationsToText(medications: MedicationItem[]): string {
   return text.trim();
 }
 
+/**
+ * Splits a single token that is wider than the available line width into chunks
+ * that each fit strictly within the target width.
+ */
+function breakWordToFit(
+  word: string,
+  font: PDFFont,
+  size: number,
+  firstChunkMaxWidth: number,
+  nextChunkMaxWidth: number
+): string[] {
+  const chunks: string[] = [];
+  let remaining = word;
+  let isFirst = true;
+
+  while (remaining.length > 0) {
+    const limitW = Math.max(12, isFirst ? firstChunkMaxWidth : nextChunkMaxWidth);
+    if (font.widthOfTextAtSize(remaining, size) <= limitW) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let cut = 1;
+    while (
+      cut < remaining.length &&
+      font.widthOfTextAtSize(remaining.slice(0, cut + 1), size) <= limitW
+    ) {
+      cut++;
+    }
+
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+    isFirst = false;
+  }
+
+  return chunks;
+}
+
+/**
+ * Wraps a single paragraph where the first line and continuation lines can have different max widths.
+ * Breaks at word boundaries first, and breaks mid-word if any single token exceeds the line width.
+ */
+function wrapParagraphWithWidths(
+  paragraph: string,
+  font: PDFFont,
+  size: number,
+  firstLineMaxWidth: number,
+  continuationMaxWidth: number
+): string[] {
+  const words = paragraph.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
+  const lines: string[] = [];
+  let current = '';
+  const getMaxW = () => Math.max(12, lines.length === 0 ? firstLineMaxWidth : continuationMaxWidth);
+
+  for (const word of words) {
+    if (!current) {
+      const limitW = getMaxW();
+      if (font.widthOfTextAtSize(word, size) <= limitW) {
+        current = word;
+      } else {
+        const chunks = breakWordToFit(word, font, size, limitW, continuationMaxWidth);
+        for (let i = 0; i < chunks.length - 1; i++) {
+          lines.push(chunks[i]);
+        }
+        current = chunks[chunks.length - 1] || '';
+      }
+      continue;
+    }
+
+    const limitW = getMaxW();
+    const candidate = `${current} ${word}`;
+    if (font.widthOfTextAtSize(candidate, size) <= limitW) {
+      current = candidate;
+    } else if (font.widthOfTextAtSize(word, size) <= Math.max(12, continuationMaxWidth)) {
+      // Normal word fits on the next line
+      lines.push(current);
+      current = word;
+    } else {
+      // Oversized unbroken word: pack what fits on the current line if reasonable, then slice the rest
+      const prefixWithSpace = `${current} `;
+      const remainingLineW = limitW - font.widthOfTextAtSize(prefixWithSpace, size);
+      if (
+        remainingLineW > size * 2 &&
+        font.widthOfTextAtSize(word.slice(0, 1), size) <= remainingLineW
+      ) {
+        const chunks = breakWordToFit(word, font, size, remainingLineW, continuationMaxWidth);
+        lines.push(`${prefixWithSpace}${chunks[0]}`);
+        for (let i = 1; i < chunks.length - 1; i++) {
+          lines.push(chunks[i]);
+        }
+        current = chunks.length > 1 ? chunks[chunks.length - 1] : '';
+      } else {
+        lines.push(current);
+        const chunks = breakWordToFit(word, font, size, continuationMaxWidth, continuationMaxWidth);
+        for (let i = 0; i < chunks.length - 1; i++) {
+          lines.push(chunks[i]);
+        }
+        current = chunks[chunks.length - 1] || '';
+      }
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines;
+}
+
 /** Wraps text to fit maxWidth, respecting explicit line breaks the user typed. */
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const safeText = sanitizeWinAnsi(text);
   const lines: string[] = [];
   for (const paragraph of safeText.split(/\r?\n/)) {
-    if (paragraph === '') {
+    if (paragraph.trim() === '') {
       lines.push('');
       continue;
     }
-    let current = '';
-    for (const word of paragraph.split(/\s+/)) {
-      if (!word) continue;
-      const candidate = current ? `${current} ${word}` : word;
-      if (current && font.widthOfTextAtSize(candidate, size) > maxWidth) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = candidate;
-      }
-    }
-    if (current) lines.push(current);
+    lines.push(...wrapParagraphWithWidths(paragraph, font, size, maxWidth, maxWidth));
   }
   return lines;
 }
 
 export type VerticalAlignMode = 'bottom' | 'middle' | 'top';
+export type HalfSheetLayoutMode = 'half_blank_form' | 'half_empty_white' | 'full_original';
 
 export interface GeneratePdfOptions {
   fieldFontSizes?: Record<string, number>;
   fieldAlignments?: Record<string, VerticalAlignMode>;
   globalFontSize?: number;
+  halfSheetMode?: HalfSheetLayoutMode;
 }
 
 /**
  * Loads the original template PDF and stamps the user's values on top of it at the
  * exact positions defined for each field, producing a real vector filled PDF.
  * Automatically mirrors values across 1ª Via and 2ª Via fields that belong to the same group.
+ * For Receita Simples and Pedido de Exames, formats the output as a half-sheet A4 Landscape
+ * (like Receita de Controle Especial) with the 1st half filled and the 2nd half left with blank information.
  */
 export async function generateFilledPdf(
   rawTemplate: FormTemplate,
@@ -394,6 +566,10 @@ export async function generateFilledPdf(
     typeof optionsOrFontSize === 'number'
       ? { globalFontSize: optionsOrFontSize }
       : optionsOrFontSize || {};
+
+  const halfSheetMode: HalfSheetLayoutMode = opts.halfSheetMode || 'half_blank_form';
+  const useHalfSheet =
+    isHalfSheetSingleViaTemplate(template) && halfSheetMode !== 'full_original';
 
   // Mirror values & font sizes across multi-via grouped fields so filling 1 box fills all vias
   const mirroredValues: Record<string, string> = { ...values };
@@ -432,7 +608,8 @@ export async function generateFilledPdf(
     }
   }
 
-  const pdfDoc = await PDFDocument.load(base64ToBytes(template.pdfBase64));
+  const origPdfBytes = base64ToBytes(template.pdfBase64);
+  const pdfDoc = await PDFDocument.load(origPdfBytes);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
@@ -445,6 +622,13 @@ export async function generateFilledPdf(
     if (!page) continue;
 
     const { width, height } = page.getSize();
+
+    // If the page is already landscape (2 halves side-by-side) and this is a Receita Simples or Pedido de Exames
+    // in half-sheet mode, leave the 2nd half (right side, xNorm >= 0.5) with its information blank.
+    if (useHalfSheet && width > height && field.xNorm >= 0.5) {
+      continue;
+    }
+
     const boxX = field.xNorm * width;
     const boxYTop = field.yNorm * height;
     const boxW = field.wNorm * width;
@@ -479,47 +663,94 @@ export async function generateFilledPdf(
 
       if (rawItems.length === 0) continue;
 
-      const numberedItems = rawItems.map((item, idx) => `${idx + 1}. ${item}`);
+      // Ensure the 2-column area stays strictly inside the form border while having proper width/height
+      const isLandscapePage = width > height;
+      const safeRightX = isLandscapePage
+        ? field.xNorm < 0.48
+          ? width * 0.476
+          : width * 0.976
+        : width * 0.94;
+      const maxAvailableW = Math.max(40, safeRightX - boxX);
+      const effectiveBoxW =
+        boxW < maxAvailableW * 0.65
+          ? maxAvailableW
+          : Math.min(boxW, maxAvailableW);
 
-      // Split evenly into 2 columns strictly inside the defined field box (boxX..boxX+boxW, boxYTop..boxYTop+boxH)
-      const mid = Math.ceil(numberedItems.length / 2);
-      const col1Items = numberedItems.slice(0, mid);
-      const col2Items = numberedItems.slice(mid);
+      const fieldsBelow = template.fields.filter(
+        (other) =>
+          other.page === field.page &&
+          other.id !== field.id &&
+          other.yNorm > field.yNorm + 0.02 &&
+          Math.abs(other.xNorm - field.xNorm) < 0.38
+      );
+      const nearestBelowYNorm =
+        fieldsBelow.length > 0
+          ? Math.min(...fieldsBelow.map((o) => o.yNorm))
+          : 0.87;
+      const safeBottomY = Math.max(boxYTop + boxH, (nearestBelowYNorm - 0.015) * height);
+      const effectiveBoxH = Math.max(boxH, safeBottomY - boxYTop);
 
       const leftPad = 4;
-      const colGap = 10;
-      const colWidth = Math.max(20, (boxW - leftPad * 2 - colGap) / 2);
+      const colGap = 12;
+      const colWidth = Math.max(30, (effectiveBoxW - leftPad * 2 - colGap) / 2);
       const col1X = boxX + leftPad;
       const col2X = col1X + colWidth + colGap;
 
-      const getMaxItemWidth = (size: number) =>
-        Math.max(
-          0,
-          ...numberedItems.map((item) => font.widthOfTextAtSize(sanitizeWinAnsi(item), size))
+      // Preserve the exact configured fontSize (never shrink the font down for long exam names)
+      const activeFontSize = fontSize;
+      const activeLineHeight = activeFontSize * 1.24;
+
+      // Wrap each exam onto the next line(s) if its name is wider than colWidth,
+      // keeping the exam number attached to the first line and indenting continuation lines
+      const wrapExamItem = (rawExamText: string, idx: number): string[] => {
+        const prefix = `${idx + 1}. `;
+        const contIndent = '   ';
+        const prefixW = font.widthOfTextAtSize(prefix, activeFontSize);
+        const contIndentW = font.widthOfTextAtSize(contIndent, activeFontSize);
+        const firstLineMaxW = Math.max(20, colWidth - prefixW);
+        const contLineMaxW = Math.max(20, colWidth - contIndentW);
+        const safeExam = sanitizeWinAnsi(rawExamText);
+
+        const bodyLines = wrapParagraphWithWidths(
+          safeExam,
+          font,
+          activeFontSize,
+          firstLineMaxW,
+          contLineMaxW
         );
 
-      let activeFontSize = fontSize;
-      let activeLineHeight = activeFontSize * 1.24;
-      let col1Lines = wrapText(col1Items.join('\n'), font, activeFontSize, colWidth);
-      let col2Lines = wrapText(col2Items.join('\n'), font, activeFontSize, colWidth);
-      let neededLines = Math.max(col1Lines.length, col2Lines.length);
+        return bodyLines.map((line, lineIdx) =>
+          lineIdx === 0 ? `${prefix}${line}` : `${contIndent}${line}`
+        );
+      };
 
-      // Scale down font if items exceed the defined box height or column width
-      while (
-        (neededLines * activeLineHeight > boxH || getMaxItemWidth(activeFontSize) > colWidth) &&
-        activeFontSize > 6
-      ) {
-        activeFontSize = Number((activeFontSize - 0.5).toFixed(1));
-        activeLineHeight = activeFontSize * 1.18;
-        col1Lines = wrapText(col1Items.join('\n'), font, activeFontSize, colWidth);
-        col2Lines = wrapText(col2Items.join('\n'), font, activeFontSize, colWidth);
-        neededLines = Math.max(col1Lines.length, col2Lines.length);
-      }
-
+      const wrappedItems: string[][] = rawItems.map((item, idx) => wrapExamItem(item, idx));
       const maxAllowedLines = Math.max(
         1,
-        Math.floor((boxH + activeLineHeight * 0.2) / activeLineHeight)
+        Math.floor((effectiveBoxH + activeLineHeight * 0.25) / activeLineHeight)
       );
+
+      // Distribute items across the 2 columns while respecting wrapped multi-line exam heights
+      let splitIdx = Math.ceil(wrappedItems.length / 2);
+      while (splitIdx > 1) {
+        const col1Count = wrappedItems
+          .slice(0, splitIdx)
+          .reduce((acc, lines) => acc + lines.length, 0);
+        const col2Count = wrappedItems
+          .slice(splitIdx)
+          .reduce((acc, lines) => acc + lines.length, 0);
+        if (
+          col1Count > maxAllowedLines &&
+          col2Count + wrappedItems[splitIdx - 1].length <= Math.max(maxAllowedLines, col1Count - 1)
+        ) {
+          splitIdx--;
+        } else {
+          break;
+        }
+      }
+
+      const col1Lines = wrappedItems.slice(0, splitIdx).flat();
+      const col2Lines = wrappedItems.slice(splitIdx).flat();
 
       col1Lines.slice(0, maxAllowedLines).forEach((line, i) => {
         const yOffset = height - boxYTop - activeFontSize - 1 - i * activeLineHeight;
@@ -529,7 +760,6 @@ export async function generateFilledPdf(
           size: activeFontSize,
           font,
           color: rgb(0.04, 0.04, 0.08),
-          maxWidth: colWidth,
         });
       });
 
@@ -541,7 +771,6 @@ export async function generateFilledPdf(
           size: activeFontSize,
           font,
           color: rgb(0.04, 0.04, 0.08),
-          maxWidth: colWidth,
         });
       });
 
@@ -580,7 +809,119 @@ export async function generateFilledPdf(
     });
   }
 
-  return pdfDoc.save();
+  const filledPdfBytes = await pdfDoc.save();
+  if (!useHalfSheet) {
+    return filledPdfBytes;
+  }
+
+  // Transform Receita Simples & Pedido de Exames into the A4 Landscape 2-Half layout
+  // (like Receita de Controle Especial, with 1st half filled and 2nd half with blank information)
+  const filledSourceDoc = await PDFDocument.load(filledPdfBytes);
+  const blankSourceDoc = await PDFDocument.load(origPdfBytes);
+  const outDoc = await PDFDocument.create();
+
+  const filledPages = filledSourceDoc.getPages();
+  const blankPages = blankSourceDoc.getPages();
+
+  for (let i = 0; i < filledPages.length; i++) {
+    const filledPage = filledPages[i];
+    const blankPage = blankPages[i];
+    const { width: srcW, height: srcH } = filledPage.getSize();
+
+    if (srcH >= srcW) {
+      // Source page is Full-Page Portrait (e.g., A4 Portrait Receita Simples or Pedido de Exames):
+      // Place 2 half-pages side-by-side on an A4 Landscape sheet (841.89 x 595.28 pts)
+      const A4_LANDSCAPE_W = 841.89;
+      const A4_LANDSCAPE_H = 595.28;
+      const halfW = A4_LANDSCAPE_W / 2;
+      const outPage = outDoc.addPage([A4_LANDSCAPE_W, A4_LANDSCAPE_H]);
+
+      const scale = Math.min(halfW / srcW, A4_LANDSCAPE_H / srcH);
+      const drawW = srcW * scale;
+      const drawH = srcH * scale;
+      const offsetX = (halfW - drawW) / 2;
+      const offsetY = (A4_LANDSCAPE_H - drawH) / 2;
+
+      // Left half: Filled form (1ª metade preenchida)
+      const embeddedFilled = await outDoc.embedPage(filledPage);
+      outPage.drawPage(embeddedFilled, {
+        x: offsetX,
+        y: offsetY,
+        width: drawW,
+        height: drawH,
+      });
+
+      // Right half: Unfilled form template ("com as informações em branco") unless user chose empty white
+      if (halfSheetMode === 'half_blank_form' && blankPage) {
+        const embeddedBlank = await outDoc.embedPage(blankPage);
+        outPage.drawPage(embeddedBlank, {
+          x: halfW + offsetX,
+          y: offsetY,
+          width: drawW,
+          height: drawH,
+        });
+      }
+
+      // Dashed vertical cut line in the middle
+      for (let y = 14; y < A4_LANDSCAPE_H - 14; y += 8) {
+        outPage.drawLine({
+          start: { x: halfW, y },
+          end: { x: halfW, y: Math.min(y + 4, A4_LANDSCAPE_H - 14) },
+          thickness: 0.6,
+          color: rgb(0.7, 0.73, 0.77),
+        });
+      }
+    } else {
+      // Source page is already Landscape (e.g., Pedido de Exames with left half form):
+      // Keep left half filled, and on the right half place the unfilled form template (or white if selected)
+      const halfW = srcW / 2;
+      const outPage = outDoc.addPage([srcW, srcH]);
+
+      const embeddedFilled = await outDoc.embedPage(filledPage);
+      outPage.drawPage(embeddedFilled, {
+        x: 0,
+        y: 0,
+        width: srcW,
+        height: srcH,
+      });
+
+      // Clear right half to ensure no stray marks
+      outPage.drawRectangle({
+        x: halfW,
+        y: 0,
+        width: halfW,
+        height: srcH,
+        color: rgb(1, 1, 1),
+      });
+
+      if (halfSheetMode === 'half_blank_form' && blankPage) {
+        const embeddedBlankLeftHalf = await outDoc.embedPage(blankPage, {
+          left: 0,
+          bottom: 0,
+          right: halfW,
+          top: srcH,
+        });
+        outPage.drawPage(embeddedBlankLeftHalf, {
+          x: halfW,
+          y: 0,
+          width: halfW,
+          height: srcH,
+        });
+      }
+
+      // Dashed vertical cut line in the middle
+      for (let y = 14; y < srcH - 14; y += 8) {
+        outPage.drawLine({
+          start: { x: halfW, y },
+          end: { x: halfW, y: Math.min(y + 4, srcH - 14) },
+          thickness: 0.6,
+          color: rgb(0.7, 0.73, 0.77),
+        });
+      }
+    }
+  }
+
+  return outDoc.save();
 }
 
 export function downloadPdfBytes(bytes: Uint8Array, filename: string) {

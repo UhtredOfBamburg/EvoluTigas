@@ -20,6 +20,8 @@ import {
   Pencil,
   Calendar,
   ChevronDown,
+  Printer,
+  Columns2,
 } from 'lucide-react';
 import { useFormTemplates } from '@/hooks/useFormTemplates';
 import { useEnfermariaPatients } from '@/hooks/useEnfermariaPatients';
@@ -34,8 +36,10 @@ import {
   isPrescriptionField,
   isRequestedExamsField,
   isDateField,
+  isHalfSheetSingleViaTemplate,
   ensureReceitaDateField,
   type VerticalAlignMode,
+  type HalfSheetLayoutMode,
 } from '@/lib/generateFilledPdf';
 import { prepareFileInlineData } from '@/lib/fileToBase64';
 import { PdfLiveViewer } from '@/components/formularios/PdfLiveViewer';
@@ -133,6 +137,27 @@ export default function Formularios() {
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
+  const [halfSheetMode, setHalfSheetMode] = useState<HalfSheetLayoutMode>(() => {
+    try {
+      const saved = localStorage.getItem('evolutigas_half_sheet_mode_v1') as HalfSheetLayoutMode | null;
+      if (saved === 'half_blank_form' || saved === 'half_empty_white' || saved === 'full_original') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'half_blank_form';
+  });
+  const printTriggerRef = useRef<(() => void) | null>(null);
+
+  const handleChangeHalfSheetMode = (mode: HalfSheetLayoutMode) => {
+    setHalfSheetMode(mode);
+    try {
+      localStorage.setItem('evolutigas_half_sheet_mode_v1', mode);
+    } catch {
+      // ignore
+    }
+  };
 
   // Resolve activeTemplate from user templates (ensuring Receitas always have Data de Solicitação)
   useEffect(() => {
@@ -259,7 +284,11 @@ export default function Formularios() {
   useEffect(() => {
     if (!activeTemplate) return;
     const timer = setTimeout(() => {
-      generateFilledPdf(activeTemplate, templateValues, { fieldFontSizes, fieldAlignments })
+      generateFilledPdf(activeTemplate, templateValues, {
+        fieldFontSizes,
+        fieldAlignments,
+        halfSheetMode,
+      })
         .then((bytes) => {
           setPdfBytes(bytes);
         })
@@ -269,7 +298,7 @@ export default function Formularios() {
     }, 240);
 
     return () => clearTimeout(timer);
-  }, [activeTemplate, templateValues, fieldFontSizes, fieldAlignments]);
+  }, [activeTemplate, templateValues, fieldFontSizes, fieldAlignments, halfSheetMode]);
 
   // Group fields across 1ª Via and 2ª Via so the user fills each field only once
   const fieldGroups = React.useMemo(
@@ -500,6 +529,7 @@ export default function Formularios() {
       const bytes = await generateFilledPdf(activeTemplate, templateValues, {
         fieldFontSizes,
         fieldAlignments,
+        halfSheetMode,
       });
       const patientLabel = templateValues.nome ? ` - ${templateValues.nome.slice(0, 30)}` : '';
       downloadPdfBytes(bytes, `${activeTemplate.name}${patientLabel}.pdf`);
@@ -1356,13 +1386,13 @@ export default function Formularios() {
         {/* RIGHT COLUMN: Native Browser PDF Viewer (Matching Reference Images 2 & 3) */}
         <div className="lg:col-span-6 sticky top-4 space-y-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs flex flex-col h-[calc(100vh-185px)] min-h-[600px]">
-            <div className="flex items-center justify-between pb-3">
+            <div className="flex items-center justify-between gap-2 pb-2.5 flex-wrap">
               <span className="text-xs font-bold tracking-wider uppercase text-slate-600 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-teal-600" />
                 PRÉVIA DO DOCUMENTO (PDF ORIGINAL + TEXTO)
               </span>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleCopyAllText}
@@ -1371,6 +1401,17 @@ export default function Formularios() {
                   {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                   {copiedText ? 'Copiado' : 'Copiar texto'}
                 </button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => printTriggerRef.current?.()}
+                  disabled={!pdfBytes || !activeTemplate}
+                  className="h-8 text-xs border-teal-200 text-teal-800 hover:bg-teal-50 font-semibold"
+                  title="Imprimir documento diretamente"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1.5 text-teal-600" />
+                  Imprimir
+                </Button>
                 <Button
                   size="sm"
                   onClick={handleDownloadPdf}
@@ -1387,18 +1428,67 @@ export default function Formularios() {
               </div>
             </div>
 
+            {/* Half-Sheet Layout Bar for Receita Simples & Pedido de Exames */}
+            {activeTemplate && isHalfSheetSingleViaTemplate(activeTemplate) && (
+              <div className="mb-2.5 px-3 py-2 rounded-xl bg-teal-50/70 border border-teal-200/80 flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-900">
+                  <Columns2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                  <span>Impressão em Meia Folha (padrão Controle Especial):</span>
+                </div>
+                <div className="inline-flex items-center p-0.5 rounded-lg bg-white border border-teal-200 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => handleChangeHalfSheetMode('half_blank_form')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                      halfSheetMode === 'half_blank_form'
+                        ? 'bg-teal-600 text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Imprime na metade esquerda e deixa a outra metade com o formulário em branco (sem preencher)"
+                  >
+                    2ª metade: Molde em branco
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleChangeHalfSheetMode('half_empty_white')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                      halfSheetMode === 'half_empty_white'
+                        ? 'bg-teal-600 text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Imprime na metade esquerda e deixa a outra metade da folha toda em branco"
+                  >
+                    2ª metade: Folha limpa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleChangeHalfSheetMode('full_original')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                      halfSheetMode === 'full_original'
+                        ? 'bg-teal-600 text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Manter página no tamanho A4 original inteiro"
+                  >
+                    A4 Inteira
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Native-style PDF Viewer Container (never blocked inside iframes) */}
             <div className="flex-1 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 relative">
               <PdfLiveViewer
                 pdfBytes={pdfBytes}
                 title={`${activeTemplate?.name || 'Documento'}.pdf`}
                 onDownload={handleDownloadPdf}
+                printTriggerRef={printTriggerRef}
               />
             </div>
 
             <div className="mt-3 rounded-xl bg-blue-50/90 border border-blue-200/80 px-4 py-2.5 text-xs text-blue-700 flex items-center justify-between gap-2">
               <span>
-                O PDF é gerado em tempo real mantendo o documento original e sobrepondo o texto. Use a barra nativa acima para dar zoom, imprimir ou clique em <strong>"Baixar PDF"</strong>.
+                O PDF é gerado em tempo real mantendo o documento original e sobrepondo o texto. Clique em <strong>"Imprimir"</strong> ou <strong>"Baixar PDF"</strong> acima.
               </span>
             </div>
           </div>
