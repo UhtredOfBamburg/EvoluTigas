@@ -480,32 +480,239 @@ export function buildPrompt(type: string, formData: unknown): string {
 
 export function buildTranscritorPrompt(customPrompt: string | undefined, outputFormat: string | undefined): string {
   const defaultFormatPrompt = `
-DIRETRIZES DE TRANSCRIÇÃO MÉDICA (PADRÃO HOSPITALAR HC/UFG):
-1. Você pode receber uma ou várias imagens/PDFs ao mesmo tempo. Se receber múltiplas páginas ou fotos, consolide e organize todos os exames por data e categoria sem omitir nenhum parâmetro relevante.
-2. Padronize abreviações médicas consagradas e separe parâmetros laboratoriais com " / " em linha contínua para economizar espaço no prontuário.
-3. REGRA OBRIGATÓRIA PARA VALORES ALTERADOS: Sempre que um valor der alterado (maior ou menor que o valor de referência do exame), coloque IMEDIATAMENTE ao lado do resultado alterado o valor de referência entre parênteses no formato (VR: XX). Utilize a faixa de referência impressa no próprio laudo (ou a referência clínica padrão caso não esteja visível). Valores dentro da normalidade NÃO devem ter (VR: XX) ao lado.
+DIRETRIZES OBRIGATÓRIAS DE TRANSCRIÇÃO DE EXAMES (FORMATO COMPACTO ABREVIADO):
+1. Você pode receber uma ou várias imagens/PDFs ao mesmo tempo. Consolide todos os exames da mesma data em uma única sequência contínua separada por " / ", iniciando apenas com a data no formato "DD/MM/AA:".
+2. PROIBIDO ESCREVER NOMES DE EXAMES POR EXTENSO: NUNCA escreva "HEMOGLOBINA", "HEMATÓCRITO", "LEUCÓCITOS", "PLAQUETAS", "GLICOSE", "HEMOGLOBINA GLICADA", "UREIA", "CREATININA", "TAXA DE FILTRAÇÃO GLOMERULAR", "SÓDIO", "POTÁSSIO", "CÁLCIO", "FÓSFORO", "MAGNÉSIO", "FERRO SÉRICO", "CAPACIDADE TOTAL DE LIGAÇÃO DO FERRO", "PROTEÍNA C REATIVA", "GAMA GLUTAMIL TRANSFERASE", "FOSFATASE ALCALINA", "TRIGLICERÍDEOS", "COLESTEROL TOTAL", "PTH - PARATORMÔNIO", "T4 L - TIROXINA LIVRE", "ÁCIDO FÓLICO", "ÁCIDO ÚRICO", "ÁCIDO LÁCTICO", etc. Use EXCLUSIVAMENTE as siglas abaixo.
+3. PROIBIDO INCLUIR UNIDADES DE MEDIDA E VALORES DE REFERÊNCIA:
+   - NUNCA escreva unidades (mg/dL, g/dL, ug/dL, pg/mL, ng/dL, uUI/mL, ug/L, mmol/L, mg/L, U/L, %, mm³, 10^6/µL).
+   - NUNCA escreva "(VR: ...)" ao lado dos resultados.
+   - NUNCA inclua "Glicose Média Estimada (GME)".
+   - No hemograma, inclua APENAS: HB / HT / VCM / HCM / RW / LEUCO / PLQ. Omita Eritrócitos, CHCM, VPM e a contagem diferencial de leucócitos se normal ou igual a zero (NUNCA escreva BLASTOS 0, PROMIELÓCITOS 0, MIELÓCITOS 0, METAMIELÓCITOS 0, BASTONETES 0, SEGMENTADOS, EOSINÓFILOS, BASÓFILOS, LINFÓCITOS, MONÓCITOS, exceto se houver desvio/alteração relevante como BAST elevado).
+   - Em LEUCO e PLQ, escreva o número inteiro sem ponto de milhar (ex: LEUCO 4610 / PLQ 95000).
+   - A Taxa de Filtração Glomerular (TFG / CKD-EPI) deve SEMPRE vir entre parênteses colada logo após a Creatinina no formato: CR <valor> (CKD <valor>) — ex: CR 1,7 (CKD 41).
 
-Se for EXAME LABORATORIAL, utilize rigorosamente este formato compacto por data (note como os alterados trazem "(VR: XX)" logo ao lado):
->> LABS (DD/MM/AA): HB 9,9 (VR: 12,0-16,0) / HT 28,6 (VR: 36,0-46,0) / VCM 87,2 / HCM 30,2 / RDW 17,8 (VR: 11,5-14,5) / LEUCO 14.170 (VR: 4.000-11.000) (BAST 3% / SEG 79% / LINF 10% / MONO 7% / EOS 1%) / PLAQ 242.000 / PCR 12,4 (VR: < 0,5) / UR 67 (VR: 15-40) / CR 1,8 (VR: 0,6-1,2) / Na 143 / K 3,7 / Mg 2,01 / P 2,5 / CaT 8,9 / TGO 24 / TGP 19 / FA 88 / GGT 42 / BT 0,8 (BD 0,2 / BI 0,6) / ALB 3,8 / TAP 20,1s (INR 1,57 (VR: 0,8-1,2)) / TTPa 37,2s (R 1,11) / [ GSA: pH 7,42 / pCO2 38 / pO2 92 / HCO3 24 / BE +0,5 / SatO2 97% / Lac 1,2 ]
+TABELA OFICIAL DE ABREVIAÇÕES OBRIGATÓRIAS (SEMPRE EM CAIXA ALTA E SEM ACENTO):
+- Hemoglobina -> HB
+- Hematócrito -> HT
+- VCM -> VCM | HCM -> HCM | RDW -> RW
+- Leucócitos -> LEUCO (sem ponto, ex: LEUCO 4610)
+- Plaquetas -> PLQ (sem ponto, ex: PLQ 95000)
+- Glicose / Glicemia -> GLIC
+- Hemoglobina Glicada (A1C) -> HBA1C
+- Ureia -> UR
+- Creatinina + TFG/CKD-EPI -> CR <valor> (CKD <valor>)
+- Sódio -> NA | Potássio -> K | Cálcio -> CA | Cálcio Iônico -> CAI | Magnésio -> MG | Fósforo -> P
+- TGO / AST -> TGO | TGP / ALT -> TGP | Gama-GT -> GGT | Fosfatase Alcalina -> FA
+- Bilirrubina Total -> BT | Direta -> BD | Indireta -> BI | Albumina -> ALB | Proteínas Totais -> PT
+- Desidrogenase Láctica (LDH) -> DHL | Amilase -> AMIL | Lipase -> LIP | CPK -> CPK
+- Proteína C Reativa -> PCR | VHS -> VHS
+- Ácido Úrico -> AC URICO | Ácido Láctico / Lactato -> LACT
+- Colesterol Total -> CT | HDL -> HDL | LDL -> LDL | VLDL -> VLDL | Triglicerídeos -> TG
+- TSH -> TSH | T4 Livre -> T4L | T3 Livre -> T3L | Paratormônio -> PTH
+- Vitamina B12 -> B12 | Ácido Fólico -> AC FOLICO | Vitamina D (25-OH) -> VIT D
+- Ferritina -> FERRITINA | Ferro Sérico -> FE | Capacidade Total de Ligação do Ferro (TIBC/CTLF) -> TIBIC | Saturação da Transferrina -> IST | Capacidade de Fixação Latente do Ferro -> CFLF
+- Imunoglobulinas -> IGG / IGM / IGA
+- TAP / TP -> TAP <seg> (INR <val>) | TTPa -> TTPA <seg> (R <val>)
+- Eletroforese de Proteínas (em linha própria sem barras):
+  EFP PT <val> ALBUM <val> GLOBULINA <val> PICO <val> REL A/G <val>
+- Cadeias Leves Livres (em linha própria sem barras):
+  KAPPA <val> LAMBDA <val> REL K/L <val>
+
+EXEMPLO EXATO DO FORMATO ESPERADO PARA EXAMES LABORATORIAIS:
+12/08/26: HB 11,5 / HT 33,6 / VCM 99 / HCM 33,9 / RW 12,6 / LEUCO 4610 / PLQ 95000 / GLIC 176 / HBA1C 7,4 / UR 55 / CR 1,7 (CKD 41) / NA 138 / K 4,3 / TGO 31 / TGP 41 / CA 9,3 / PCR 1,23 / TSH 1,21 / B12 655 / FERRITINA 612 / AC FOLICO 7,26 / TIBIC 340 / IGG 1316 / IGM 89 / IGA 216 / 
+EFP PT 7,1 ALBUM 3,85 GLOBULINA 3,27 PICO 0,28 REL A/G 1,18
+KAPPA 40,11 LAMBDA 17,63 REL K/L 2,28
 
 Se for EXAME DE IMAGEM (TC, RM, RX, USG, ECO, EDA, Colonoscopia), estruture assim:
 >> [NOME DO EXAME EM CAIXA ALTA] (DD/MM/AA):
 - DESCRIÇÃO / ACHADOS PRINCIPAIS: (Resumo técnico objetivo dos achados relevantes)
-- CONCLUSÃO / IMPRESSÃO: (Resumo fiel da conclusão do laudo em destaque)
-
-Se for CONTROLE DE SINAIS VITAIS / BALANÇO HÍDRICO (24h), estruture assim:
-# CONTROLES 24H:
-PAS: mín-máx mmHg | PAD: mín-máx mmHg | PAM: mín-máx mmHg | FC: mín-máx bpm | FR: mín-máx irpm | SpO2: mín-máx% | Tax: mín-máx °C | HGT: mín-máx mg/dL | Diurese: X mL | BH: +/- X mL
+- CONCLUSÃO / IMPRESSÃO: (Resumo fiel da conclusão do laudo)
 `;
 
-  return `Você é um médico especialista em transcrição de exames complementares para prontuário hospitalar.
-Transcreva fielmente os resultados contidos nas imagens/documentos ou no texto enviado.
+  return `Você é um médico especialista em transcrição enxuta e abreviada de exames complementares para prontuário hospitalar.
+Transcreva fielmente os resultados contidos nas imagens/documentos ou no texto enviado, convertendo TODOS os nomes de exames laboratoriais para suas abreviações clínicas padronizadas em caixa alta, sem unidades de medida e sem valores de referência.
+${outputFormat && outputFormat.trim() ? `\nO usuário definiu um FORMATO DE SAÍDA PERSONALIZADO prioritário:\n"""\n${outputFormat}\n"""\nSiga rigorosamente a estrutura e o estilo deste formato personalizado!` : defaultFormatPrompt}
 
-REGRA INEGOCIÁVEL DE VALORES DE REFERÊNCIA: Sempre que qualquer resultado quantitativo estiver ALTERADO (maior ou menor que o valor de referência), escreva obrigatoriamente ao lado dele o valor de referência entre parênteses no formato "(VR: XX)" — por exemplo: "HB 9,9 (VR: 12-16) / CR 1,9 (VR: 0,6-1,2) / K 3,9". Não adicione "(VR: XX)" em resultados normais.
-${outputFormat && outputFormat.trim() ? `\nO usuário definiu um FORMATO DE SAÍDA PERSONALIZADO prioritário:\n"""\n${outputFormat}\n"""\nSiga rigorosamente a estrutura e o estilo deste formato personalizado, mantendo sempre "(VR: XX)" ao lado de cada valor alterado!` : defaultFormatPrompt}
+Instruções ou texto complementar enviado pelo usuário: ${customPrompt || 'Transcreva os exames anexados no formato abreviado padrão.'}
+Retorne apenas a transcrição pronta para copiar e colar no prontuário, sem frases introdutórias e sem markdown (**).`;
+}
 
-Instruções ou texto complementar enviado pelo usuário: ${customPrompt || 'Transcreva os exames anexados.'}
-Retorne apenas a transcrição pronta para copiar e colar no prontuário, sem frases introdutórias.`;
+/**
+ * Deterministic post-processor that guarantees lab exam transcriptions use compact clinical
+ * abbreviations (HB, HT, VCM, HCM, RW, LEUCO, PLQ, GLIC, HBA1C, UR, CR (CKD), NA, K, etc.)
+ * and strips verbose units, reference values (VR: ...), and zero-count differential noise.
+ */
+export function postProcessTranscritorOutput(rawText: string, customOutputFormat?: string): string {
+  if (!rawText || typeof rawText !== 'string') return rawText;
+
+  const hasCustomFormat = Boolean(customOutputFormat && customOutputFormat.trim());
+  const customWantsVr = hasCustomFormat && /\bVR\b/i.test(customOutputFormat!);
+
+  let text = rawText.replace(/\*\*/g, '').trim();
+
+  // 1. Normalize ">> LABS (DD/MM/YYYY):" or "LABS (DD/MM/YY):" to "DD/MM/YY:"
+  if (!hasCustomFormat) {
+    text = text.replace(/(?:>>\s*)?LABS?\s*\((\d{2}\/\d{2}\/)(?:20)?(\d{2})\)\s*:/gi, '$1$2:');
+    text = text.replace(/^(\s*)(?:>>\s*)?(\d{2}\/\d{2}\/)20(\d{2})\s*:/gm, '$1$2$3:');
+  }
+
+  // 2. Strip "(VR: ...)" unless custom format explicitly wants VR
+  if (!customWantsVr) {
+    text = text.replace(/\s*\((?:VR|V\.R\.|Ref\.?|Valores?\s+de\s+refer[êe]ncia)\s*:[^)]*\)/gi, '');
+  }
+
+  // 3. Process line by line so we don't corrupt imaging reports (TC/RM/USG descriptions)
+  const rawLines = text.split('\n');
+  const processedLines: string[] = [];
+
+  for (const rawLine of rawLines) {
+    let line = rawLine.trim();
+    if (!line) {
+      processedLines.push('');
+      continue;
+    }
+
+    // Leave imaging report description/conclusion lines untouched
+    const isImagingProse =
+      /^[-•*]\s*(?:DESCRI[ÇC][ÃA]O|ACHADOS|CONCLUS[ÃA]O|IMPRESS[ÃA]O|LAUDO|T[ÉE]CNICA)/i.test(line) ||
+      /^>>\s*(?:TC|TOMOGRAFIA|RM|RESSON[ÂA]NCIA|USG|ULTRASSONOGRAFIA|RX|RAIO[\s-]X|ECO|ECOCARDIOGRAMA|EDA|ENDOSCOPIA|COLONOSCOPIA|BI[ÓO]PSIA|ANATOMOPATOL[ÓO]GICO)\b/i.test(line);
+
+    if (isImagingProse) {
+      processedLines.push(line);
+      continue;
+    }
+
+    // Replace mid-line ">>" with " / "
+    line = line.replace(/\s*>>\s*/g, ' / ').replace(/^\s*\/\s*/, '');
+
+    // Remove Glicose Média Estimada (GME)
+    line = line.replace(
+      /(?:\/\s*)?Glicose\s+M[ée]dia\s+Estimada\s*(?:\(GME\))?\s*[\d.,]+\s*(?:mg\/dL)?\s*/gi,
+      ' '
+    );
+
+    // Remove zero-value or routine differential leucogram items when dumped verbatim from lab PDF
+    line = line.replace(
+      /\s*\/\s*(?:BLASTOS|PROMIEL[ÓO]CITOS|MIELOBASTOS|MIELOBLASTOS|MIEL[ÓO]CITOS|METAMIEL[ÓO]CITOS|BASTONETES|LINF[ÓO]CITOS\s+AT[ÍI]PICOS|PLASM[ÓO]CITOS)\s+0+(?:[.,]0+)?(?:\s*\([^)]*\))?(?=\s*\/|\s*$)/gi,
+      ''
+    );
+    line = line.replace(
+      /\s*\/\s*(?:SEGMENTADOS|EOSIN[ÓO]FILOS|BAS[ÓO]FILOS|LINF[ÓO]CITOS(?:\s+T[ÍI]PICOS)?|MON[ÓO]CITOS)\s+[\d.,]+\s*\([\d.,]+%\)(?=\s*\/|\s*$)/gi,
+      ''
+    );
+
+    // Remove ERITRÓCITOS, CHCM, VPM when part of standard hemograma dump
+    line = line.replace(/\b(?:ERITR[ÓO]CITOS|HEM[ÁA]CIAS)\s+[\d.,]+\s*(?:10\^\d+\/[µu]L)?\s*\/\s*/gi, '');
+    line = line.replace(/\s*\/\s*(?:CHCM|VPM)\s+[\d.,]+(?=\s*\/|\s*$)/gi, '');
+
+    // Replace full lab exam names with standard abbreviations (ordered longest/most specific first)
+    const replacements: Array<[RegExp, string]> = [
+      [/\bHEMOGLOBINA\s+GLICADA(?:\s*[-–—]\s*A1C|\s*\(HBA1C\)|\s*A1C|\s*\(A1C\))?\b/gi, 'HBA1C'],
+      [/\bCONCENTRA[ÇC][ÃA]O\s+DE\s+HEMOGLOBINA\s+CORPUSCULAR\s+M[ÉE]DIA(?:\s*\(CHCM\))?\b/gi, 'CHCM'],
+      [/\bHEMOGLOBINA\s+CORPUSCULAR\s+M[ÉE]DIA(?:\s*\(HCM\))?\b/gi, 'HCM'],
+      [/\bVOLUME\s+CORPUSCULAR\s+M[ÉE]DIO(?:\s*\(VCM\))?\b/gi, 'VCM'],
+      [/\bVOLUME\s+PLAQUET[ÁA]RIO\s+M[ÉE]DIO(?:\s*\(VPM\))?\b/gi, 'VPM'],
+      [/\bHEMOGLOBINA\b/gi, 'HB'],
+      [/\bHEMAT[ÓO]CRITO\b/gi, 'HT'],
+      [/\bRDW\b/gi, 'RW'],
+      [/\bLEUC[ÓO]CITOS(?:\s+TOTAIS|\s+GLOBAL)?\b/gi, 'LEUCO'],
+      [/\bPLAQUETAS\b|\bPLAQ\b/gi, 'PLQ'],
+      [/\bGLICOSE(?:\s+EM\s+JEJUM|\s+DE\s+JEJUM|\s+S[ÉE]RICA|\s+PLASM[ÁA]TICA)?\b|\bGLICEMIA(?:\s+DE\s+JEJUM|\s+EM\s+JEJUM)?\b/gi, 'GLIC'],
+      [/\bUREIA(?:\s+S[ÉE]RICA)?\b/gi, 'UR'],
+      [/\bCREATININA(?:\s+S[ÉE]RICA)?\b/gi, 'CR'],
+      [/\bTAXA\s+DE\s+FILTRA[ÇC][ÃA]O\s+GLOMERULAR(?:\s+ESTIMADA)?(?:\s*\((?:TFG|CKD-EPI|eTFG)\))?\b|\bRITMO\s+DE\s+FILTRA[ÇC][ÃA]O\s+GLOMERULAR\b|\bCKD-EPI\b|\bTFGe?\b/gi, 'CKD'],
+      [/\bS[ÓO]DIO(?:\s+S[ÉE]RICO)?\b|\bNa\b/g, 'NA'],
+      [/\bPOT[ÁA]SSIO(?:\s+S[ÉE]RICO)?\b/gi, 'K'],
+      [/\bC[ÁA]LCIO\s+I[ÔO]NICO\b|\bC[ÁA]LCIO\s+IONIZADO\b|\bCaI\b/gi, 'CAI'],
+      [/\bC[ÁA]LCIO(?:\s+TOTAL|\s+S[ÉE]RICO)?\b|\bCaT\b|\bCa\b/g, 'CA'],
+      [/\bMAGN[ÉE]SIO(?:\s+S[ÉE]RICO)?\b|\bMg\b/g, 'MG'],
+      [/\bF[ÓO]SFORO(?:\s+S[ÉE]RICO|\s+INORG[ÂA]NICO)?\b/gi, 'P'],
+      [/\bASPARTATO\s+AMINOTRANSFERASE(?:\s*\((?:AST|TGO)\))?\b|\bTRANSAMINASE\s+(?:GLUT[ÂA]MICO[\s-]+)?OXALAC[ÉE]TICA\b|\bAST\s*\/\s*TGO\b|\bTGO\s*\/\s*AST\b|\bTGO\s*\(AST\)\b|\bAST\s*\(TGO\)\b/gi, 'TGO'],
+      [/\bALANINA\s+AMINOTRANSFERASE(?:\s*\((?:ALT|TGP)\))?\b|\bTRANSAMINASE\s+(?:GLUT[ÂA]MICO[\s-]+)?PIR[ÚU]VICA\b|\bALT\s*\/\s*TGP\b|\bTGP\s*\/\s*ALT\b|\bTGP\s*\(ALT\)\b|\bALT\s*\(TGP\)\b/gi, 'TGP'],
+      [/\bGAMA\s*[-–—]?\s*GLUTAMIL\s+TRANSFERASE(?:\s*\(GGT\))?\b|\bGAMA\s*[-–—]?\s*GT\b/gi, 'GGT'],
+      [/\bFOSFATASE\s+ALCALINA(?:\s*\(FA\))?\b|\bFALC\b/gi, 'FA'],
+      [/\bPROTE[ÍI]NA\s+C\s+REATIVA(?:\s+ULTRASSENS[ÍI]VEL)?(?:\s*\(PCR\))?\b/gi, 'PCR'],
+      [/\bVELOCIDADE\s+DE\s+HEMOSSEDIMENTA[ÇC][ÃA]O(?:\s*\(VHS\))?\b/gi, 'VHS'],
+      [/\bPTH\s*[-–—]\s*PARATORM[ÔO]NIO\b|\bPARATORM[ÔO]NIO(?:\s*[-–—]\s*PTH|\s+INTACTO|\s*\(PTH\))?\b/gi, 'PTH'],
+      [/\bT4\s*L?\s*[-–—]\s*TIROXINA\s+LIVRE\b|\bTIROXINA\s+LIVRE(?:\s*[-–—]\s*T4\s*L?|\s*\(T4\s*L(?:IVRE)?\))?\b|\bT4\s+LIVRE\b|\bT4\s+L\b/gi, 'T4L'],
+      [/\bT3\s*L?\s*[-–—]\s*TRIIODOTIRONINA\s+LIVRE\b|\bTRIIODOTIRONINA\s+LIVRE\b|\bT3\s+LIVRE\b|\bT3\s+L\b/gi, 'T3L'],
+      [/\bHORM[ÔO]NIO\s+TIREOESTIMULANTE(?:\s*[-–—]\s*TSH|\s*\(TSH\))?\b|\bTSH\s+ULTRASSENS[ÍI]VEL\b/gi, 'TSH'],
+      [/\bVITAMINA\s+B\s*12\b|\bCIANOCOBALAMINA\b/gi, 'B12'],
+      [/\b[ÁA]CIDO\s+F[ÓO]LICO\b|\bFOLATO\b/gi, 'AC FOLICO'],
+      [/\b25\s*[-–—]?\s*(?:OH|HIDROXI)\s*[-–—]?\s*VITAMINA\s+D\b|\bVITAMINA\s+D(?:\s+25\s+HIDROXI|\s*\(25-OH\))?\b/gi, 'VIT D'],
+      [/\bCAPACIDADE\s+TOTAL\s+DE\s+LIGA[ÇC][ÃA]O\s+DO\s+FERRO(?:\s*\((?:TIBC|TIBIC|CTLF)\))?\b|\bCAPACIDADE\s+TOTAL\s+DE\s+COMBINA[ÇC][ÃA]O\s+DO\s+FERRO\b|\bTIBC\b|\bCTLF\b/gi, 'TIBIC'],
+      [/\bCAPACIDADE\s+DE\s+FIXA[ÇC][ÃA]O\s+LATENTE\s+DO\s+FERRO(?:\s*\(CFLF\))?\b|\bCAPACIDADE\s+LATENTE\s+DE\s+LIGA[ÇC][ÃA]O\s+DO\s+FERRO\b/gi, 'CFLF'],
+      [/(?:%\s*DE\s+|\b[ÍI]NDICE\s+DE\s+)?SATURA[ÇC][ÃA]O\s+DA\s+TRANSFERRINA(?:\s*\(IST\))?/gi, 'IST'],
+      [/\bFERRO\s+S[ÉE]RICO\b|\bFERRO\b(?!\s+LIVRE)/gi, 'FE'],
+      [/\bTRIGLICER[ÍI]DEOS\b|\bTRIGLIC[ÉE]RIDES\b|\bTRIG\b/gi, 'TG'],
+      [/\bCOLESTEROL\s+TOTAL\b/gi, 'CT'],
+      [/\bCOLESTEROL\s+HDL\b|\bHDL\s*[-–—]\s*COLESTEROL\b/gi, 'HDL'],
+      [/\bCOLESTEROL\s+LDL\b|\bLDL\s*[-–—]\s*COLESTEROL\b/gi, 'LDL'],
+      [/\bCOLESTEROL\s+VLDL\b|\bVLDL\s*[-–—]\s*COLESTEROL\b/gi, 'VLDL'],
+      [/\b[ÁA]CIDO\s+[ÚU]RICO(?:\s+S[ÉE]RICO)?\b/gi, 'AC URICO'],
+      [/\b[ÁA]CIDO\s+L[ÁA]CTICO\b|\bLACTATO\b/gi, 'LACT'],
+      [/\bDESIDROGENASE\s+L[ÁA]CTICA(?:\s*\((?:LDH|DHL)\))?\b|\bLDH\b/gi, 'DHL'],
+      [/\bBILIRRUBINA\s+TOTAL\b/gi, 'BT'],
+      [/\bBILIRRUBINA\s+DIRETA\b/gi, 'BD'],
+      [/\bBILIRRUBINA\s+INDIRETA\b/gi, 'BI'],
+      [/\bIMUNOGLOBULINA\s+G(?:\s*\(IGG\))?\b|\bIgG\b/g, 'IGG'],
+      [/\bIMUNOGLOBULINA\s+M(?:\s*\(IGM\))?\b|\bIgM\b/g, 'IGM'],
+      [/\bIMUNOGLOBULINA\s+A(?:\s*\(IGA\))?\b|\bIgA\b/g, 'IGA'],
+      [/\bIMUNOGLOBULINA\s+E(?:\s*\(IGE\))?\b|\bIgE\b/g, 'IGE'],
+    ];
+
+    for (const [regex, abbr] of replacements) {
+      line = line.replace(regex, abbr);
+    }
+
+    // Strip standard measurement units right after numbers
+    line = line.replace(
+      /(\d+(?:[.,]\d+)?)\s*(?:mg\/dL|g\/dL|ug\/dL|µg\/dL|mcg\/dL|pg\/mL|ng\/dL|ng\/mL|uUI\/mL|µUI\/mL|mUI\/L|mUI\/mL|ug\/L|µg\/L|mmol\/L|mEq\/L|U\/L|UI\/L|mg\/L|mL\/min\/1[.,]73\s*m[²2]|10\^\d+\/[µu]L|\/mm[³3]|mm[³3]|fL|pg|%)(?=\s|$|\/|\))/gi,
+      '$1'
+    );
+
+    // Combine "CR <val> / CKD <val>" into "CR <val> (CKD <val>)"
+    line = line.replace(/\bCR\s+([\d.,]+)\s*\/\s*CKD\s+([\d.,]+)/gi, 'CR $1 (CKD $2)');
+
+    // Remove thousand separator dots in LEUCO and PLQ (e.g. LEUCO 5.210 -> LEUCO 5210, PLQ 339.000 -> PLQ 339000)
+    line = line.replace(/\b(LEUCO|PLQ)\s+(\d{1,3})\.(\d{3})(?!\d)/g, '$1 $2$3');
+
+    // Clean up duplicate slashes and spacing
+    line = line
+      .replace(/\s*\/\s*(?:\/\s*)+/g, ' / ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    processedLines.push(line);
+  }
+
+  // 4. Merge multiple lines that share the exact same date header (e.g. from multi-batch uploads)
+  if (!hasCustomFormat) {
+    const mergedLines: string[] = [];
+    const dateLineIndexMap = new Map<string, number>();
+
+    for (const line of processedLines) {
+      const dateMatch = line.match(/^(\d{2}\/\d{2}\/\d{2,4}):\s*(.+)$/);
+      if (dateMatch) {
+        const dateKey = dateMatch[1];
+        const restContent = dateMatch[2].replace(/\s*\/\s*$/, '').trim();
+        if (dateLineIndexMap.has(dateKey)) {
+          const idx = dateLineIndexMap.get(dateKey)!;
+          const existing = mergedLines[idx].replace(/\s*\/\s*$/, '');
+          mergedLines[idx] = `${existing} / ${restContent}`;
+        } else {
+          dateLineIndexMap.set(dateKey, mergedLines.length);
+          mergedLines.push(`${dateKey}: ${restContent}`);
+        }
+      } else {
+        mergedLines.push(line);
+      }
+    }
+
+    return mergedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  return processedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**

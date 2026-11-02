@@ -4,6 +4,7 @@ import {
   MULTIMODAL_TYPES,
   buildPrompt,
   buildTranscritorPrompt,
+  postProcessTranscritorOutput,
   buildFieldDetectionPrompt,
   buildAutoFieldDetectionPrompt,
   buildFormAutoFillPrompt,
@@ -497,6 +498,9 @@ export async function handler(event: any) {
     const userApiKey = typeof aiProviderConfig?.apiKey === 'string' ? aiProviderConfig.apiKey.trim() : '';
     const userModel = typeof aiProviderConfig?.model === 'string' ? aiProviderConfig.model.trim() : '';
 
+    const finalizeText = (raw: string) =>
+      type === 'transcritor-exames' ? postProcessTranscritorOutput(raw, outputFormat) : raw;
+
     try {
       if (provider === 'chatgpt' && userApiKey) {
         const resultText = await generateWithChatGpt(
@@ -506,7 +510,7 @@ export async function handler(event: any) {
           sanitizedImages,
           isJsonResponse
         );
-        return jsonResponse(200, { text: resultText, provider: 'chatgpt' });
+        return jsonResponse(200, { text: finalizeText(resultText), provider: 'chatgpt' });
       }
 
       if (provider === 'claude' && userApiKey) {
@@ -517,7 +521,7 @@ export async function handler(event: any) {
           sanitizedImages,
           isJsonResponse
         );
-        return jsonResponse(200, { text: resultText, provider: 'claude' });
+        return jsonResponse(200, { text: finalizeText(resultText), provider: 'claude' });
       }
 
       const envKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
@@ -559,7 +563,7 @@ export async function handler(event: any) {
           .join('\n') ||
         '';
       return jsonResponse(200, {
-        text: resultText,
+        text: finalizeText(resultText),
         provider: provider === 'gemini' ? 'gemini' : 'builtin',
       });
     } catch (error: any) {

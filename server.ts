@@ -7,6 +7,7 @@ import {
   MULTIMODAL_TYPES,
   buildPrompt,
   buildTranscritorPrompt,
+  postProcessTranscritorOutput,
   buildFieldDetectionPrompt,
   buildAutoFieldDetectionPrompt,
   buildFormAutoFillPrompt,
@@ -449,6 +450,9 @@ async function startServer() {
     const userApiKey = typeof aiProviderConfig?.apiKey === "string" ? aiProviderConfig.apiKey.trim() : "";
     const userModel = typeof aiProviderConfig?.model === "string" ? aiProviderConfig.model.trim() : "";
 
+    const finalizeText = (raw: string) =>
+      type === "transcritor-exames" ? postProcessTranscritorOutput(raw, outputFormat) : raw;
+
     try {
       if (provider === "chatgpt" && userApiKey) {
         const resultText = await generateWithChatGpt(
@@ -458,7 +462,7 @@ async function startServer() {
           sanitizedImages,
           isJsonResponse
         );
-        return res.json({ text: resultText, provider: "chatgpt" });
+        return res.json({ text: finalizeText(resultText), provider: "chatgpt" });
       }
 
       if (provider === "claude" && userApiKey) {
@@ -469,7 +473,7 @@ async function startServer() {
           sanitizedImages,
           isJsonResponse
         );
-        return res.json({ text: resultText, provider: "claude" });
+        return res.json({ text: finalizeText(resultText), provider: "claude" });
       }
 
       const isCustomGemini = Boolean(provider === "gemini" && userApiKey);
@@ -511,7 +515,7 @@ async function startServer() {
           .filter(Boolean)
           .join("\n") ||
         "";
-      return res.json({ text: resultText, provider: provider === "gemini" ? "gemini" : "builtin" });
+      return res.json({ text: finalizeText(resultText), provider: provider === "gemini" ? "gemini" : "builtin" });
     } catch (error: any) {
       console.error(`Error generating text for type "${type}" with provider "${provider}":`, error);
       const status = error?.status && Number.isInteger(error.status) ? error.status : 500;

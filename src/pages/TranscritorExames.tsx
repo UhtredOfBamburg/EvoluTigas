@@ -6,12 +6,13 @@ import { prepareFilesSequentially } from '@/lib/fileToBase64';
 import { useAiGenerate } from '@/hooks/useAiGenerate';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { postProcessTranscritorOutput } from '../../server/prompts';
 
 type Message = { role: 'user' | 'assistant', content: string, type?: 'image' | 'text' };
 interface SavedSession { id: string; name: string; date: string; messages: Message[] }
 interface SavedFormat { id: string; label: string; format: string }
 
-const BATCH_SIZE = 4;
+const BATCH_SIZE = 8;
 
 export default function TranscritorExames() {
   const [isSync, setIsSync] = useState(true);
@@ -81,7 +82,7 @@ export default function TranscritorExames() {
       }
 
       if (transcribedParts.length > 0) {
-        replaceLastLoadingMessage(transcribedParts.join('\n\n'));
+        replaceLastLoadingMessage(postProcessTranscritorOutput(transcribedParts.join('\n'), outputFormat));
       } else {
         replaceLastLoadingMessage('Erro ao transcrever exame. Tente novamente.');
       }
@@ -462,7 +463,7 @@ export default function TranscritorExames() {
             </div>
             
             <Textarea 
-              placeholder="Cole aqui um EXEMPLO do formato desejado (ex: PADRÃO HC/UFG). Valores alterados já recebem (VR: XX) automaticamente."
+              placeholder="Opcional: cole aqui um exemplo caso deseje outro formato. O padrão já abrevia automaticamente (ex: 12/08/26: HB 11,5 / HT 33,6 / VCM 99 / HCM 33,9 / RW 12,6 / LEUCO 4610 / PLQ 95000 / GLIC 176 / HBA1C 7,4 / UR 55 / CR 1,7 (CKD 41) / NA 138 / K 4,3...)"
               value={outputFormat}
               onChange={e => setOutputFormat(e.target.value)}
               className="min-h-[120px] text-xs resize-none bg-slate-50"

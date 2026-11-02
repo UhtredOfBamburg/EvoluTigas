@@ -6,6 +6,7 @@ import {
   MULTIMODAL_TYPES,
   buildPrompt,
   buildTranscritorPrompt,
+  postProcessTranscritorOutput,
   buildFieldDetectionPrompt,
   buildAutoFieldDetectionPrompt,
   buildFormAutoFillPrompt,
@@ -595,6 +596,9 @@ export async function executeAiGeneration(
   const userApiKey = typeof aiProviderConfig?.apiKey === 'string' ? aiProviderConfig.apiKey.trim() : '';
   const userModel = typeof aiProviderConfig?.model === 'string' ? aiProviderConfig.model.trim() : '';
 
+  const finalizeText = (raw: string) =>
+    type === 'transcritor-exames' ? postProcessTranscritorOutput(raw, outputFormat) : raw;
+
   // 1. Direct Client Execution when key is available for external providers
   if (provider === 'chatgpt' && userApiKey) {
     const text = await generateWithChatGptClient(
@@ -604,7 +608,7 @@ export async function executeAiGeneration(
       sanitizedImages,
       isJsonResponse
     );
-    return { text, provider: 'chatgpt' };
+    return { text: finalizeText(text), provider: 'chatgpt' };
   }
 
   if (provider === 'claude' && userApiKey) {
@@ -615,7 +619,7 @@ export async function executeAiGeneration(
       sanitizedImages,
       isJsonResponse
     );
-    return { text, provider: 'claude' };
+    return { text: finalizeText(text), provider: 'claude' };
   }
 
   if (provider === 'gemini' && userApiKey) {
@@ -626,7 +630,7 @@ export async function executeAiGeneration(
       isJsonResponse,
       userModel
     );
-    return { text, provider: 'gemini' };
+    return { text: finalizeText(text), provider: 'gemini' };
   }
 
   // 2. Built-in provider: check if we have a shared/env Gemini key on the client
@@ -640,7 +644,7 @@ export async function executeAiGeneration(
         isJsonResponse,
         userModel
       );
-      return { text, provider: 'builtin' };
+      return { text: finalizeText(text), provider: 'builtin' };
     } catch (clientErr) {
       console.warn('[AI Client] Builtin client key failed, trying server fallback:', clientErr);
     }
@@ -696,5 +700,5 @@ export async function executeAiGeneration(
     );
   }
 
-  return { text: parsedBody.text, provider: parsedBody.provider || provider };
+  return { text: finalizeText(parsedBody.text), provider: parsedBody.provider || provider };
 }
