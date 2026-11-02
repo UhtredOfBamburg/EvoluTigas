@@ -139,10 +139,19 @@ export default function TranscritorExames() {
   };
 
   const getCompiledText = () => {
-    return messages
-      .filter(m => m.role === 'assistant' && !m.content.includes('Lendo exame anexado...') && !m.content.includes('Transcrevendo exames...') && !m.content.includes('Lendo exames anexados...'))
-      .map(m => m.content)
+    const rawCompiled = messages
+      .filter(
+        (m) =>
+          m.role === 'assistant' &&
+          !m.content.includes('Lendo exame anexado...') &&
+          !m.content.includes('Transcrevendo exames...') &&
+          !m.content.includes('Lendo exames anexados...') &&
+          !m.content.includes('Preparando ') &&
+          !m.content.includes('Otimizando arquivo')
+      )
+      .map((m) => m.content)
       .join('\n\n');
+    return rawCompiled ? postProcessTranscritorOutput(rawCompiled, outputFormat) : '';
   };
 
   const handleCompilar = async () => {

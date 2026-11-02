@@ -481,8 +481,14 @@ export function buildPrompt(type: string, formData: unknown): string {
 export function buildTranscritorPrompt(customPrompt: string | undefined, outputFormat: string | undefined): string {
   const defaultFormatPrompt = `
 DIRETRIZES OBRIGATÓRIAS DE TRANSCRIÇÃO DE EXAMES (FORMATO COMPACTO ABREVIADO):
-1. Você pode receber uma ou várias imagens/PDFs ao mesmo tempo. Consolide todos os exames da mesma data em uma única sequência contínua separada por " / ", iniciando apenas com a data no formato "DD/MM/AA:".
-2. PROIBIDO ESCREVER NOMES DE EXAMES POR EXTENSO: NUNCA escreva "HEMOGLOBINA", "HEMATÓCRITO", "LEUCÓCITOS", "PLAQUETAS", "GLICOSE", "HEMOGLOBINA GLICADA", "UREIA", "CREATININA", "TAXA DE FILTRAÇÃO GLOMERULAR", "SÓDIO", "POTÁSSIO", "CÁLCIO", "FÓSFORO", "MAGNÉSIO", "FERRO SÉRICO", "CAPACIDADE TOTAL DE LIGAÇÃO DO FERRO", "PROTEÍNA C REATIVA", "GAMA GLUTAMIL TRANSFERASE", "FOSFATASE ALCALINA", "TRIGLICERÍDEOS", "COLESTEROL TOTAL", "PTH - PARATORMÔNIO", "T4 L - TIROXINA LIVRE", "ÁCIDO FÓLICO", "ÁCIDO ÚRICO", "ÁCIDO LÁCTICO", etc. Use EXCLUSIVAMENTE as siglas abaixo.
+1. UNIFICAÇÃO OBRIGATÓRIAS POR DATA E SEPARAÇÃO EM PARÁGRAFOS:
+   - Você pode receber várias imagens/fotos/PDFs de exames ao mesmo tempo.
+   - UNIFIQUE TODOS os exames laboratoriais da MESMA DATA em um ÚNICO parágrafo/linha contínua separada por " / ", iniciando apenas com a data no formato "DD/MM/AA:". NUNCA crie várias linhas repetindo a mesma data!
+   - SEMPRE separe datas diferentes em parágrafos distintos (com uma linha em branco entre cada data). NUNCA coloque exames de dias diferentes grudados no mesmo parágrafo!
+   - Ordene as datas em ordem cronológica (da mais antiga para a mais recente) e, dentro de cada data, coloque o Hemograma (HB / HT / VCM / HCM / RW / LEUCO / PLQ) primeiro quando presente.
+2. PROIBIDO ESCREVER NOMES DE EXAMES POR EXTENSO E PROIBIDO USAR ">> LABS":
+   - NUNCA escreva ">> LABS (DD/MM/AAAA):". Escreva apenas "DD/MM/AA:".
+   - NUNCA escreva "HEMOGLOBINA", "HEMATÓCRITO", "LEUCÓCITOS", "PLAQUETAS", "GLICOSE", "HEMOGLOBINA GLICADA", "UREIA", "CREATININA", "TAXA DE FILTRAÇÃO GLOMERULAR", "SÓDIO", "POTÁSSIO", "CÁLCIO", "FÓSFORO", "MAGNÉSIO", "FERRO SÉRICO", "CAPACIDADE TOTAL DE LIGAÇÃO DO FERRO", "PROTEÍNA C REATIVA", "GAMA GLUTAMIL TRANSFERASE", "FOSFATASE ALCALINA", "TRIGLICERÍDEOS", "COLESTEROL TOTAL", "PTH - PARATORMÔNIO", "T4 L - TIROXINA LIVRE", "ÁCIDO FÓLICO", "ÁCIDO ÚRICO", "ÁCIDO LÁCTICO", etc. Use EXCLUSIVAMENTE as siglas abaixo.
 3. PROIBIDO INCLUIR UNIDADES DE MEDIDA E VALORES DE REFERÊNCIA:
    - NUNCA escreva unidades (mg/dL, g/dL, ug/dL, pg/mL, ng/dL, uUI/mL, ug/L, mmol/L, mg/L, U/L, %, mm³, 10^6/µL).
    - NUNCA escreva "(VR: ...)" ao lado dos resultados.
@@ -498,7 +504,7 @@ TABELA OFICIAL DE ABREVIAÇÕES OBRIGATÓRIAS (SEMPRE EM CAIXA ALTA E SEM ACENTO
 - Leucócitos -> LEUCO (sem ponto, ex: LEUCO 4610)
 - Plaquetas -> PLQ (sem ponto, ex: PLQ 95000)
 - Glicose / Glicemia -> GLIC
-- Hemoglobina Glicada (A1C) -> HBA1C
+- Hemoglobina Glicada (A1C / HbA1c) -> HBA1C
 - Ureia -> UR
 - Creatinina + TFG/CKD-EPI -> CR <valor> (CKD <valor>)
 - Sódio -> NA | Potássio -> K | Cálcio -> CA | Cálcio Iônico -> CAI | Magnésio -> MG | Fósforo -> P
@@ -518,29 +524,33 @@ TABELA OFICIAL DE ABREVIAÇÕES OBRIGATÓRIAS (SEMPRE EM CAIXA ALTA E SEM ACENTO
 - Cadeias Leves Livres (em linha própria sem barras):
   KAPPA <val> LAMBDA <val> REL K/L <val>
 
-EXEMPLO EXATO DO FORMATO ESPERADO PARA EXAMES LABORATORIAIS:
-12/08/26: HB 11,5 / HT 33,6 / VCM 99 / HCM 33,9 / RW 12,6 / LEUCO 4610 / PLQ 95000 / GLIC 176 / HBA1C 7,4 / UR 55 / CR 1,7 (CKD 41) / NA 138 / K 4,3 / TGO 31 / TGP 41 / CA 9,3 / PCR 1,23 / TSH 1,21 / B12 655 / FERRITINA 612 / AC FOLICO 7,26 / TIBIC 340 / IGG 1316 / IGM 89 / IGA 216 / 
-EFP PT 7,1 ALBUM 3,85 GLOBULINA 3,27 PICO 0,28 REL A/G 1,18
-KAPPA 40,11 LAMBDA 17,63 REL K/L 2,28
+EXEMPLO EXATO DO FORMATO ESPERADO (COM MÚLTIPLAS DATAS SEPARADAS EM PARÁGRAFOS E MESMA DATA UNIFICADA):
+23/07/24: HBA1C 6,2
 
-Se for EXAME DE IMAGEM (TC, RM, RX, USG, ECO, EDA, Colonoscopia), estruture assim:
+23/07/26: HB 14,4 / HT 43,3 / VCM 85 / HCM 28 / RW 12,9 / LEUCO 5210 / PLQ 339000 / GLIC 172 / HBA1C 6,2 / UR 54 / CR 1,3 (CKD 48,5) / NA 142 / K 4,2 / CA 11,3 / P 4,0 / TGO 22,6 / TGP 21 / GGT 65 / FA 210 / LACT 13,6 / PCR 1,0 / AC URICO 5,3 / CT 261 / HDL 48,9 / LDL 184 / TG 139,8 / TSH 6,30 / FERRITINA 123
+
+30/07/26: PTH 53,3 / T4L 1,20 / FE 111,9 / CFLF 235 / IST 32,3 / TIBIC 347
+
+Se for EXAME DE IMAGEM (TC, RM, RX, USG, ECO, EDA, Colonoscopia), estruture em parágrafo separado:
 >> [NOME DO EXAME EM CAIXA ALTA] (DD/MM/AA):
 - DESCRIÇÃO / ACHADOS PRINCIPAIS: (Resumo técnico objetivo dos achados relevantes)
 - CONCLUSÃO / IMPRESSÃO: (Resumo fiel da conclusão do laudo)
 `;
 
   return `Você é um médico especialista em transcrição enxuta e abreviada de exames complementares para prontuário hospitalar.
-Transcreva fielmente os resultados contidos nas imagens/documentos ou no texto enviado, convertendo TODOS os nomes de exames laboratoriais para suas abreviações clínicas padronizadas em caixa alta, sem unidades de medida e sem valores de referência.
+Transcreva fielmente os resultados contidos nas imagens/documentos ou no texto enviado, convertendo TODOS os nomes de exames laboratoriais para suas abreviações clínicas padronizadas em caixa alta, sem unidades de medida, sem valores de referência, unificando todos os exames da mesma data em um único parágrafo e separando datas diferentes por uma linha em branco.
 ${outputFormat && outputFormat.trim() ? `\nO usuário definiu um FORMATO DE SAÍDA PERSONALIZADO prioritário:\n"""\n${outputFormat}\n"""\nSiga rigorosamente a estrutura e o estilo deste formato personalizado!` : defaultFormatPrompt}
 
-Instruções ou texto complementar enviado pelo usuário: ${customPrompt || 'Transcreva os exames anexados no formato abreviado padrão.'}
+Instruções ou texto complementar enviado pelo usuário: ${customPrompt || 'Transcreva os exames anexados no formato abreviado padrão, unificando exames do mesmo dia.'}
 Retorne apenas a transcrição pronta para copiar e colar no prontuário, sem frases introdutórias e sem markdown (**).`;
 }
 
 /**
- * Deterministic post-processor that guarantees lab exam transcriptions use compact clinical
- * abbreviations (HB, HT, VCM, HCM, RW, LEUCO, PLQ, GLIC, HBA1C, UR, CR (CKD), NA, K, etc.)
- * and strips verbose units, reference values (VR: ...), and zero-count differential noise.
+ * Deterministic post-processor that guarantees lab exam transcriptions:
+ * 1) Use compact clinical abbreviations (HB, HT, VCM, HCM, RW, LEUCO, PLQ, GLIC, HBA1C, UR, CR (CKD), NA, K, etc.)
+ * 2) Strip verbose units, reference values (VR: ...), and zero-count differential noise
+ * 3) Unify ALL lab results from the same date (DD/MM/YY) into a single block (with Hemograma first)
+ * 4) Separate every distinct date block and imaging report into its own paragraph (\n\n)
  */
 export function postProcessTranscritorOutput(rawText: string, customOutputFormat?: string): string {
   if (!rawText || typeof rawText !== 'string') return rawText;
@@ -548,11 +558,14 @@ export function postProcessTranscritorOutput(rawText: string, customOutputFormat
   const hasCustomFormat = Boolean(customOutputFormat && customOutputFormat.trim());
   const customWantsVr = hasCustomFormat && /\bVR\b/i.test(customOutputFormat!);
 
-  let text = rawText.replace(/\*\*/g, '').trim();
+  let text = rawText.replace(/\*\*/g, '').replace(/\r\n/g, '\n').trim();
 
-  // 1. Normalize ">> LABS (DD/MM/YYYY):" or "LABS (DD/MM/YY):" to "DD/MM/YY:"
+  // 1. Ensure any mid-line ">> LABS (DD/MM/YYYY):" or "LABS (DD/MM/YY):" starts on a new line with normalized "DD/MM/YY:"
   if (!hasCustomFormat) {
-    text = text.replace(/(?:>>\s*)?LABS?\s*\((\d{2}\/\d{2}\/)(?:20)?(\d{2})\)\s*:/gi, '$1$2:');
+    text = text.replace(
+      /(?:^|\n|\s+)(?:>>\s*)?LABS?\s*\((\d{2}\/\d{2}\/)(?:20)?(\d{2})\)\s*:/gi,
+      '\n$1$2: '
+    );
     text = text.replace(/^(\s*)(?:>>\s*)?(\d{2}\/\d{2}\/)20(\d{2})\s*:/gm, '$1$2$3:');
   }
 
@@ -561,26 +574,9 @@ export function postProcessTranscritorOutput(rawText: string, customOutputFormat
     text = text.replace(/\s*\((?:VR|V\.R\.|Ref\.?|Valores?\s+de\s+refer[êe]ncia)\s*:[^)]*\)/gi, '');
   }
 
-  // 3. Process line by line so we don't corrupt imaging reports (TC/RM/USG descriptions)
-  const rawLines = text.split('\n');
-  const processedLines: string[] = [];
-
-  for (const rawLine of rawLines) {
-    let line = rawLine.trim();
-    if (!line) {
-      processedLines.push('');
-      continue;
-    }
-
-    // Leave imaging report description/conclusion lines untouched
-    const isImagingProse =
-      /^[-•*]\s*(?:DESCRI[ÇC][ÃA]O|ACHADOS|CONCLUS[ÃA]O|IMPRESS[ÃA]O|LAUDO|T[ÉE]CNICA)/i.test(line) ||
-      /^>>\s*(?:TC|TOMOGRAFIA|RM|RESSON[ÂA]NCIA|USG|ULTRASSONOGRAFIA|RX|RAIO[\s-]X|ECO|ECOCARDIOGRAMA|EDA|ENDOSCOPIA|COLONOSCOPIA|BI[ÓO]PSIA|ANATOMOPATOL[ÓO]GICO)\b/i.test(line);
-
-    if (isImagingProse) {
-      processedLines.push(line);
-      continue;
-    }
+  const abbreviateLabSegment = (segment: string): string => {
+    let line = segment.trim();
+    if (!line) return '';
 
     // Replace mid-line ">>" with " / "
     line = line.replace(/\s*>>\s*/g, ' / ').replace(/^\s*\/\s*/, '');
@@ -605,9 +601,8 @@ export function postProcessTranscritorOutput(rawText: string, customOutputFormat
     line = line.replace(/\b(?:ERITR[ÓO]CITOS|HEM[ÁA]CIAS)\s+[\d.,]+\s*(?:10\^\d+\/[µu]L)?\s*\/\s*/gi, '');
     line = line.replace(/\s*\/\s*(?:CHCM|VPM)\s+[\d.,]+(?=\s*\/|\s*$)/gi, '');
 
-    // Replace full lab exam names with standard abbreviations (ordered longest/most specific first)
     const replacements: Array<[RegExp, string]> = [
-      [/\bHEMOGLOBINA\s+GLICADA(?:\s*[-–—]\s*A1C|\s*\(HBA1C\)|\s*A1C|\s*\(A1C\))?\b/gi, 'HBA1C'],
+      [/\bHEMOGLOBINA\s+GLICADA(?:\s*[-–—]\s*A1C|\s*\(HBA1C\)|\s*A1C|\s*\(A1C\))?\b|\bHbA1c\b/gi, 'HBA1C'],
       [/\bCONCENTRA[ÇC][ÃA]O\s+DE\s+HEMOGLOBINA\s+CORPUSCULAR\s+M[ÉE]DIA(?:\s*\(CHCM\))?\b/gi, 'CHCM'],
       [/\bHEMOGLOBINA\s+CORPUSCULAR\s+M[ÉE]DIA(?:\s*\(HCM\))?\b/gi, 'HCM'],
       [/\bVOLUME\s+CORPUSCULAR\s+M[ÉE]DIO(?:\s*\(VCM\))?\b/gi, 'VCM'],
@@ -680,39 +675,184 @@ export function postProcessTranscritorOutput(rawText: string, customOutputFormat
     // Clean up duplicate slashes and spacing
     line = line
       .replace(/\s*\/\s*(?:\/\s*)+/g, ' / ')
+      .replace(/^\s*\/\s*|\s*\/\s*$/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
 
-    processedLines.push(line);
+    return line;
+  };
+
+  if (hasCustomFormat) {
+    const lines = text.split('\n').map((rawLine) => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) return '';
+      const isProse =
+        /^[-•*]\s*(?:DESCRI[ÇC][ÃA]O|ACHADOS|CONCLUS[ÃA]O|IMPRESS[ÃA]O|LAUDO|T[ÉE]CNICA|EAS|UROCULTURA|CULTURA)/i.test(trimmed) ||
+        /^>>\s*(?:TC|TOMOGRAFIA|RM|RESSON[ÂA]NCIA|USG|ULTRASSONOGRAFIA|RX|RAIO[\s-]X|ECO|ECOCARDIOGRAMA|EDA|ENDOSCOPIA|COLONOSCOPIA|BI[ÓO]PSIA|ANATOMOPATOL[ÓO]GICO)\b/i.test(trimmed);
+      return isProse ? trimmed : abbreviateLabSegment(trimmed);
+    });
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  // 4. Merge multiple lines that share the exact same date header (e.g. from multi-batch uploads)
-  if (!hasCustomFormat) {
-    const mergedLines: string[] = [];
-    const dateLineIndexMap = new Map<string, number>();
+  // 3. Group and unify blocks by date (DD/MM/YY) and keep imaging reports as distinct paragraphs
+  interface DateLabBlock {
+    dateKey: string;
+    sortTime: number;
+    items: string[];
+    subLines: string[];
+  }
 
-    for (const line of processedLines) {
-      const dateMatch = line.match(/^(\d{2}\/\d{2}\/\d{2,4}):\s*(.+)$/);
-      if (dateMatch) {
-        const dateKey = dateMatch[1];
-        const restContent = dateMatch[2].replace(/\s*\/\s*$/, '').trim();
-        if (dateLineIndexMap.has(dateKey)) {
-          const idx = dateLineIndexMap.get(dateKey)!;
-          const existing = mergedLines[idx].replace(/\s*\/\s*$/, '');
-          mergedLines[idx] = `${existing} / ${restContent}`;
-        } else {
-          dateLineIndexMap.set(dateKey, mergedLines.length);
-          mergedLines.push(`${dateKey}: ${restContent}`);
-        }
-      } else {
-        mergedLines.push(line);
-      }
+  const dateBlocksMap = new Map<string, DateLabBlock>();
+  const otherBlocks: string[][] = [];
+
+  const parseDateSortTime = (dateKey: string): number => {
+    const m = dateKey.match(/^(\d{2})\/(\d{2})\/(\d{2,4})$/);
+    if (!m) return Number.MAX_SAFE_INTEGER;
+    const dd = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    let yyyy = parseInt(m[3], 10);
+    if (yyyy < 100) yyyy += 2000;
+    return yyyy * 10000 + mm * 100 + dd;
+  };
+
+  const normalizeDateKey = (rawDate: string): string => {
+    return rawDate.replace(/^(\d{2}\/\d{2}\/)20(\d{2})$/, '$1$2');
+  };
+
+  const addItemsToDateBlock = (block: DateLabBlock, rawSegment: string) => {
+    const abbreviated = abbreviateLabSegment(rawSegment);
+    if (!abbreviated) return;
+    const parts = abbreviated
+      .split(/\s*\/\s*/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+
+    const startsWithHemograma = /^HB\s+[\d.,]+/i.test(parts[0]);
+    const existingSet = new Set(block.items.map((i) => i.toUpperCase()));
+    const newUnique = parts.filter((p) => {
+      const upper = p.toUpperCase();
+      if (existingSet.has(upper)) return false;
+      existingSet.add(upper);
+      return true;
+    });
+
+    if (startsWithHemograma && block.items.length > 0 && !/^HB\s+[\d.,]+/i.test(block.items[0])) {
+      block.items = [...newUnique, ...block.items];
+    } else {
+      block.items.push(...newUnique);
+    }
+  };
+
+  let activeContext: { type: 'date'; block: DateLabBlock } | { type: 'other'; lines: string[] } | null = null;
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Check if this is an imaging report header (e.g. ">> ULTRASSONOGRAFIA ... (12/06/2026):")
+    const isImagingHeader =
+      /^>>\s*(?!LABS?\b)[A-ZÀ-Ú0-9]/i.test(line) ||
+      /^(?:TC|TOMOGRAFIA|RM|RESSON[ÂA]NCIA|USG|ULTRASSONOGRAFIA|RX|RAIO[\s-]X|ECO|ECOCARDIOGRAMA|EDA|ENDOSCOPIA|COLONOSCOPIA|BI[ÓO]PSIA|ANATOMOPATOL[ÓO]GICO)\b.*:/i.test(line);
+
+    if (isImagingHeader) {
+      const normalizedHeader = line.replace(/\((\d{2}\/\d{2}\/)20(\d{2})\)/g, '($1$2)');
+      const imagingLines = [normalizedHeader];
+      otherBlocks.push(imagingLines);
+      activeContext = { type: 'other', lines: imagingLines };
+      continue;
     }
 
-    return mergedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    // Check if this line starts with a date header "DD/MM/YY:" or "DD/MM/YYYY:"
+    const dateHeaderMatch = line.match(/^(?:>>\s*)?(\d{2}\/\d{2}\/\d{2,4})\s*:\s*(.*)$/);
+    if (dateHeaderMatch) {
+      const dateKey = normalizeDateKey(dateHeaderMatch[1]);
+      const rest = dateHeaderMatch[2].trim();
+
+      let block = dateBlocksMap.get(dateKey);
+      if (!block) {
+        block = {
+          dateKey,
+          sortTime: parseDateSortTime(dateKey),
+          items: [],
+          subLines: [],
+        };
+        dateBlocksMap.set(dateKey, block);
+      }
+
+      if (rest) {
+        if (/^(?:EFP\s+PT|KAPPA\s+|-\s*(?:EAS|UROCULTURA|CULTURA|PARASITOL[ÓO]GICO))/i.test(rest)) {
+          if (!block.subLines.includes(rest)) block.subLines.push(rest);
+        } else {
+          addItemsToDateBlock(block, rest);
+        }
+      }
+
+      activeContext = { type: 'date', block };
+      continue;
+    }
+
+    // Check if this is a special sub-line of a lab date block (EFP, KAPPA, EAS, UROCULTURA)
+    const isLabSubLine = /^(?:EFP\s+PT|KAPPA\s+|[-•*]?\s*(?:EAS|URINA\s+TIPO\s+1|SUM[ÁA]RIO\s+DE\s+URINA|UROCULTURA|HEMOCULTURA|COPROCULTURA|PARASITOL[ÓO]GICO|EPF)\s*:)/i.test(
+      line
+    );
+    if (isLabSubLine && activeContext?.type === 'date') {
+      const formattedSub = /^[-•*]/.test(line) || /^(?:EFP|KAPPA)/i.test(line) ? line : `- ${line}`;
+      if (!activeContext.block.subLines.includes(formattedSub)) {
+        activeContext.block.subLines.push(formattedSub);
+      }
+      continue;
+    }
+
+    // If currently inside an imaging/other block and line is a bullet or prose continuation
+    if (activeContext?.type === 'other') {
+      activeContext.lines.push(line);
+      continue;
+    }
+
+    // If currently inside a date block and line has lab results without repeating the date
+    if (activeContext?.type === 'date') {
+      addItemsToDateBlock(activeContext.block, line);
+      continue;
+    }
+
+    // Fallback standalone line
+    const abbreviatedStandalone = abbreviateLabSegment(line);
+    if (abbreviatedStandalone) {
+      otherBlocks.push([abbreviatedStandalone]);
+      activeContext = { type: 'other', lines: otherBlocks[otherBlocks.length - 1] };
+    }
   }
 
-  return processedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // 4. Sort date blocks chronologically and format each block as its own distinct paragraph
+  const sortedDateBlocks = Array.from(dateBlocksMap.values()).sort(
+    (a, b) => a.sortTime - b.sortTime
+  );
+
+  const paragraphs: string[] = [];
+
+  for (const block of sortedDateBlocks) {
+    const lines: string[] = [];
+    if (block.items.length > 0) {
+      lines.push(`${block.dateKey}: ${block.items.join(' / ')}`);
+      if (block.subLines.length > 0) {
+        lines.push(...block.subLines);
+      }
+    } else if (block.subLines.length > 0) {
+      lines.push(`${block.dateKey}:`, ...block.subLines);
+    }
+    if (lines.length > 0) {
+      paragraphs.push(lines.join('\n'));
+    }
+  }
+
+  for (const other of otherBlocks) {
+    if (other.length > 0) {
+      paragraphs.push(other.join('\n'));
+    }
+  }
+
+  return paragraphs.join('\n\n').trim();
 }
 
 /**

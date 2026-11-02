@@ -1,13 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const geminiKey = env.VITE_GEMINI_API_KEY || env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-
+export default defineConfig(() => {
   return {
     base: process.env.GITHUB_PAGES === 'true' ? './' : '/',
     plugins: [
@@ -90,17 +87,36 @@ export default defineConfig(({mode}) => {
         },
       }),
     ],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
-      dedupe: ['react', 'react-dom', 'react-router-dom'],
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-router-dom'],
     },
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'],
+      entries: ['index.html', 'src/**/*.{ts,tsx}'],
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-router-dom',
+        'lucide-react',
+        'motion/react',
+        '@pedi-growth/core',
+        'clsx',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/firestore',
+        'jspdf',
+        'pdf-lib',
+        'pdfjs-dist/legacy/build/pdf.mjs',
+        'pdfjs-dist/legacy/build/pdf.worker.mjs',
+        'react-markdown',
+        'recharts',
+        'tailwind-merge',
+      ],
     },
     build: {
       rollupOptions: {

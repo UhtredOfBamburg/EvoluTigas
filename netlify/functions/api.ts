@@ -343,7 +343,14 @@ export async function handler(event: any) {
       }
 
       if (provider === 'gemini') {
-        const customGemini = new GoogleGenAI({ apiKey: cleanKey });
+        const customGemini = new GoogleGenAI({
+          apiKey: cleanKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
         const response = await generateWithGeminiFallback(
           customGemini,
           'Responda apenas com a palavra: CONECTADO',
@@ -524,8 +531,8 @@ export async function handler(event: any) {
         return jsonResponse(200, { text: finalizeText(resultText), provider: 'claude' });
       }
 
-      const envKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
-      const activeKey = provider === 'gemini' && userApiKey ? userApiKey : userApiKey || envKey;
+      const envKey = process.env.GEMINI_API_KEY || '';
+      const activeKey = provider === 'gemini' && userApiKey ? userApiKey : envKey || userApiKey;
 
       if (!activeKey) {
         return jsonResponse(500, {
@@ -534,7 +541,14 @@ export async function handler(event: any) {
         });
       }
 
-      const activeGeminiClient = new GoogleGenAI({ apiKey: activeKey });
+      const activeGeminiClient = new GoogleGenAI({
+        apiKey: activeKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
       const geminiContents =
         sanitizedImages.length > 0
           ? [

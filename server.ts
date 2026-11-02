@@ -361,7 +361,14 @@ async function startServer() {
       }
 
       if (provider === "gemini") {
-        const customGemini = new GoogleGenAI({ apiKey: cleanKey });
+        const customGemini = new GoogleGenAI({
+          apiKey: cleanKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
         const response = await generateWithGeminiFallback(
           customGemini,
           "Responda apenas com a palavra: CONECTADO",
@@ -478,8 +485,25 @@ async function startServer() {
 
       const isCustomGemini = Boolean(provider === "gemini" && userApiKey);
       const activeGeminiClient = isCustomGemini
-        ? new GoogleGenAI({ apiKey: userApiKey })
-        : defaultAi;
+        ? new GoogleGenAI({
+            apiKey: userApiKey,
+            httpOptions: {
+              headers: {
+                "User-Agent": "aistudio-build",
+              },
+            },
+          })
+        : defaultAi ||
+          (userApiKey
+            ? new GoogleGenAI({
+                apiKey: userApiKey,
+                httpOptions: {
+                  headers: {
+                    "User-Agent": "aistudio-build",
+                  },
+                },
+              })
+            : null);
 
       if (!activeGeminiClient) {
         return res.status(500).json({
@@ -606,10 +630,87 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    app.get("/@vite/client", (_req, res) => {
+      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.send(`
+const sheetsMap = new Map();
+export function updateStyle(id, content) {
+  if (typeof document === "undefined") return;
+  let style = sheetsMap.get(id) || document.querySelector(\`style[data-vite-dev-id="\${id}"]\`);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.setAttribute("data-vite-dev-id", id);
+    style.textContent = content;
+    document.head.appendChild(style);
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style && style.parentNode) {
+    style.parentNode.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    accept() {},
+    dispose() {},
+    prune() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+    data: {}
+  };
+}
+export function injectQuery(url) {
+  return url;
+}
+export class ErrorOverlay extends HTMLElement {
+  close() {}
+}
+`);
+    });
+    app.use((req, res, next) => {
+      if (
+        req.path === "/" ||
+        req.path === "/index.html" ||
+        req.path.startsWith("/src/") ||
+        req.path.startsWith("/node_modules/.vite/") ||
+        req.path.startsWith("/@")
+      ) {
+        delete req.headers["if-none-match"];
+        delete req.headers["if-modified-since"];
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        const origSetHeader = res.setHeader.bind(res);
+        res.setHeader = (name: string, value: any) => {
+          if (name.toLowerCase() === "cache-control") {
+            return origSetHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+          }
+          return origSetHeader(name, value);
+        };
+      }
+      next();
+    });
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
+    const depsOptimizer = (vite as any).environments?.client?.depsOptimizer;
+    if (depsOptimizer?.init) {
+      await depsOptimizer.init().catch(() => {});
+    }
+    if (depsOptimizer?.scanProcessing) {
+      await depsOptimizer.scanProcessing.catch(() => {});
+    }
+    await vite.warmupRequest("/src/main.tsx").catch(() => {});
+    await vite.warmupRequest("/src/App.tsx").catch(() => {});
+    await vite.warmupRequest("/src/hooks/useToast.tsx").catch(() => {});
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");

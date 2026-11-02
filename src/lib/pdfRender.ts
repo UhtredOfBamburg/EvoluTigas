@@ -91,7 +91,7 @@ export function openPdfDocumentBytes(bytes: Uint8Array) {
     isOffscreenCanvasSupported: false,
     isEvalSupported: false,
     useSystemFonts: true,
-  });
+  } as Parameters<typeof pdfjsLib.getDocument>[0]);
 }
 
 export async function loadPdfDocument(pdfBase64: string) {

@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -13,43 +12,6 @@ import {
 } from '../../server/prompts';
 
 export const SHARED_BUILTIN_KEY_STORAGE = 'evolutigas_global_builtin_gemini_key_v1';
-
-let lastHealthyGeminiModel: string | null = null;
-let lastHealthyGeminiTs = 0;
-const HEALTHY_CACHE_TTL_MS = 10 * 60 * 1000;
-const BLOCKED_MODEL_TTL_MS = 15 * 60 * 1000;
-const blockedModelsMap = new Map<string, number>();
-
-function isModelTemporarilyBlocked(model: string): boolean {
-  const ts = blockedModelsMap.get(model);
-  if (!ts) return false;
-  if (Date.now() - ts > BLOCKED_MODEL_TTL_MS) {
-    blockedModelsMap.delete(model);
-    return false;
-  }
-  return true;
-}
-
-function markModelTemporarilyBlocked(model: string) {
-  blockedModelsMap.set(model, Date.now());
-}
-
-function withModelTimeout<T>(promise: Promise<T>, ms: number, modelName: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timeout after ${ms}ms on ${modelName}`));
-    }, ms);
-    promise
-      .then((val) => {
-        clearTimeout(timer);
-        resolve(val);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
 
 export function reportClientErrorToCloud(context: string, err: unknown, extra?: Record<string, any>) {
   try {
@@ -125,59 +87,7 @@ export function getBuiltinGeminiApiKey(): string {
     // ignore storage errors
   }
 
-  try {
-    const viteKey = (import.meta as any)?.env?.VITE_GEMINI_API_KEY;
-    if (typeof viteKey === 'string' && viteKey.trim()) {
-      return viteKey.trim();
-    }
-  } catch {
-    // ignore
-  }
-
-  try {
-    const procKey = typeof process !== 'undefined' ? (process as any)?.env?.GEMINI_API_KEY : '';
-    if (typeof procKey === 'string' && procKey.trim()) {
-      return procKey.trim();
-    }
-  } catch {
-    // ignore
-  }
-
   return '';
-}
-
-function resolveGeminiCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim();
-  const normalized =
-    pref === 'gemini-2.5-pro' || pref === 'argon'
-      ? 'gemini-4-argon'
-      : pref === 'gemini-2.5-flash' || pref === 'gemini-2.0-flash' || !pref
-      ? 'gemini-3.8-flash'
-      : pref === 'gemini-2.5-flash-lite'
-      ? 'gemini-3.1-flash-lite'
-      : pref;
-
-  const isHealthyCacheValid =
-    lastHealthyGeminiModel && Date.now() - lastHealthyGeminiTs < HEALTHY_CACHE_TTL_MS;
-
-  const rawList = Array.from(
-    new Set([
-      ...(isHealthyCacheValid && lastHealthyGeminiModel ? [lastHealthyGeminiModel] : []),
-      normalized,
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-flash-lite-latest',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-latest',
-      'gemini-4-argon',
-    ])
-  );
-
-  const healthy = rawList.filter((m) => !isModelTemporarilyBlocked(m));
-  const blocked = rawList.filter((m) => isModelTemporarilyBlocked(m));
-  return [...healthy, ...blocked];
 }
 
 function resolveChatGptCandidateModels(preferredModel?: string): string[] {
@@ -199,75 +109,6 @@ function resolveClaudeCandidateModels(preferredModel?: string): string[] {
       'claude-3-5-haiku-latest',
     ])
   );
-}
-
-export async function generateWithGeminiClient(
-  apiKey: string,
-  promptText: string,
-  images: SanitizedImage[],
-  isJsonResponse: boolean,
-  preferredModel?: string
-): Promise<string> {
-  const aiClient = new GoogleGenAI({ apiKey: apiKey.trim() });
-  const candidates = resolveGeminiCandidateModels(preferredModel);
-
-  const contents =
-    images.length > 0
-      ? [
-          {
-            role: 'user',
-            parts: [...images.map((img) => ({ inlineData: img })), { text: promptText }],
-          },
-        ]
-      : promptText;
-
-  let firstError: any = null;
-
-  for (const modelName of candidates) {
-    const baseConfig: Record<string, any> = {
-      temperature: isJsonResponse ? 0.1 : 0.25,
-    };
-    if (isJsonResponse) {
-      baseConfig.responseMimeType = 'application/json';
-    }
-
-    try {
-      const response = await withModelTimeout(
-        aiClient.models.generateContent({
-          model: modelName,
-          contents,
-          config: baseConfig,
-        }),
-        22000,
-        modelName
-      );
-
-      const resultText =
-        response.text ||
-        response.candidates?.[0]?.content?.parts
-          ?.map((p) => (p as any).text)
-          .filter(Boolean)
-          .join('\n') ||
-        '';
-
-      if (resultText.trim()) {
-        lastHealthyGeminiModel = modelName;
-        lastHealthyGeminiTs = Date.now();
-        return resultText;
-      }
-    } catch (err: any) {
-      if (!firstError) firstError = err;
-      markModelTemporarilyBlocked(modelName);
-      const msg = String(err?.message || err || '');
-      console.warn(`[AI Client] Gemini model "${modelName}" failed:`, msg);
-      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
-        break;
-      }
-    }
-  }
-
-  reportClientErrorToCloud('generateWithGeminiClient', firstError, { preferredModel });
-  throw firstError || new Error('Não foi possível gerar resposta com o Google Gemini.');
 }
 
 export async function generateWithChatGptClient(
@@ -454,7 +295,37 @@ export async function testAiProviderDirect(
     return { ok: false, error: 'Insira a chave de acesso para testar a conexão.' };
   }
 
-  // First try direct browser connection (works on Netlify static, Vercel, local, etc.)
+  if (provider === 'gemini') {
+    try {
+      const res = await fetch('/api/test-ai-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey: cleanKey, model }),
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          return { ok: true, sample: data.sample };
+        }
+        if (data.error) {
+          return { ok: false, error: data.error };
+        }
+      }
+      return {
+        ok: false,
+        error: 'Não foi possível conectar com o Google Gemini. Verifique se a chave está correta.',
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        error:
+          err?.message ||
+          'Não foi possível conectar com o Google Gemini. Verifique sua conexão.',
+      };
+    }
+  }
+
   try {
     if (provider === 'chatgpt') {
       const reply = await generateWithChatGptClient(
@@ -477,19 +348,7 @@ export async function testAiProviderDirect(
       );
       return { ok: true, sample: reply.trim().slice(0, 60) };
     }
-
-    if (provider === 'gemini') {
-      const reply = await generateWithGeminiClient(
-        cleanKey,
-        'Responda apenas com a palavra: CONECTADO',
-        [],
-        false,
-        model
-      );
-      return { ok: true, sample: reply.trim().slice(0, 60) };
-    }
   } catch (directErr: any) {
-    // Fallback to backend route if available (e.g. if CORS blocked in a strict corporate network)
     try {
       const res = await fetch('/api/test-ai-provider', {
         method: 'POST',
@@ -599,7 +458,7 @@ export async function executeAiGeneration(
   const finalizeText = (raw: string) =>
     type === 'transcritor-exames' ? postProcessTranscritorOutput(raw, outputFormat) : raw;
 
-  // 1. Direct Client Execution when key is available for external providers
+  // 1. Direct Client Execution when key is available for external non-Gemini providers
   if (provider === 'chatgpt' && userApiKey) {
     const text = await generateWithChatGptClient(
       userApiKey,
@@ -622,45 +481,26 @@ export async function executeAiGeneration(
     return { text: finalizeText(text), provider: 'claude' };
   }
 
-  if (provider === 'gemini' && userApiKey) {
-    const text = await generateWithGeminiClient(
-      userApiKey,
-      promptText,
-      sanitizedImages,
-      isJsonResponse,
-      userModel
-    );
-    return { text: finalizeText(text), provider: 'gemini' };
-  }
+  // 2. Server-side execution for Gemini and Builtin AI via /api/generate-evolucao
+  const sharedKey = getBuiltinGeminiApiKey();
+  const effectivePayload: ExecuteAiPayload = {
+    ...payload,
+    aiProviderConfig: {
+      ...payload.aiProviderConfig,
+      provider,
+      apiKey: userApiKey || (provider === 'builtin' && sharedKey ? sharedKey : undefined),
+    },
+  };
 
-  // 2. Built-in provider: check if we have a shared/env Gemini key on the client
-  const builtinKey = getBuiltinGeminiApiKey();
-  if (builtinKey) {
-    try {
-      const text = await generateWithGeminiClient(
-        builtinKey,
-        promptText,
-        sanitizedImages,
-        isJsonResponse,
-        userModel
-      );
-      return { text: finalizeText(text), provider: 'builtin' };
-    } catch (clientErr) {
-      console.warn('[AI Client] Builtin client key failed, trying server fallback:', clientErr);
-    }
-  }
-
-  // 3. Fallback to backend /api/generate-evolucao (works in AI Studio container & Netlify Functions with server env var)
   const response = await fetch('/api/generate-evolucao', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(effectivePayload),
   });
 
   const contentType = response.headers.get('content-type') || '';
   const rawResponseText = await response.text();
 
-  // If Netlify static redirect returned index.html instead of JSON API response:
   if (
     contentType.includes('text/html') ||
     rawResponseText.trim().startsWith('<!DOCTYPE') ||

@@ -5,36 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (function() {
-        var origError = console.error;
-        console.error = function() {
-          var firstArg = arguments[0];
-          if (typeof firstArg === 'string' && (firstArg.indexOf('[vite]') !== -1 || firstArg.indexOf('WebSocket') !== -1)) {
-            return;
+        function syncSharedInternals(internals) {
+          if (internals && internals.currentDispatcherRef) {
+            var ref = internals.currentDispatcherRef;
+            window.__REACT_ACTIVE_SHARED_INTERNALS__ = ref;
+            var _h = ref.H;
+            try {
+              Object.defineProperty(ref, 'H', {
+                configurable: true,
+                enumerable: true,
+                get: function() { return _h; },
+                set: function(v) {
+                  _h = v;
+                  if (window.__REACT_SHARED_INTERNALS_SINGLETON__ && window.__REACT_SHARED_INTERNALS_SINGLETON__ !== ref) {
+                    window.__REACT_SHARED_INTERNALS_SINGLETON__.H = v;
+                  }
+                }
+              });
+            } catch (_) {}
           }
-          return origError.apply(console, arguments);
-        };
-        window.addEventListener('error', function(e) {
-          var msg = String((e && e.message) || '');
-          var file = String((e && e.filename) || '');
-          if (msg === 'Script error.' || file.indexOf('@vite/client') !== -1 || msg.indexOf('[vite]') !== -1) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-          }
-        }, true);
-        window.addEventListener('unhandledrejection', function(e) {
-          var reason = String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || '');
-          if (reason.indexOf('@vite/client') !== -1 || reason.indexOf('WebSocket') !== -1 || reason.indexOf('Worker was destroyed') !== -1) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-          }
-        }, true);
+        }
+        if (!window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+          var _renderers = new Map();
+          var _id = 0;
+          window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+            supportsFiber: true,
+            renderers: _renderers,
+            inject: function(internals) {
+              syncSharedInternals(internals);
+              var id = ++_id;
+              _renderers.set(id, internals);
+              return id;
+            },
+            onCommitFiberRoot: function() {},
+            onCommitFiberUnmount: function() {},
+            onPostCommitFiberRoot: function() {},
+            checkDCE: function() {}
+          };
+        } else if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject === 'function') {
+          var _origInject = window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject;
+          window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject = function(internals) {
+            syncSharedInternals(internals);
+            return _origInject.apply(this, arguments);
+          };
+        }
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.getRegistrations().then(function(regs) {
             for (var i = 0; i < regs.length; i++) {
               var reg = regs[i];
               var scriptURL = (reg.active && reg.active.scriptURL) || (reg.installing && reg.installing.scriptURL) || '';
-              if (scriptURL.indexOf('dev-sw.js') !== -1) {
+              if (scriptURL.indexOf('dev-sw.js') !== -1 || window.location.hostname.indexOf('ais-dev-') === 0) {
                 reg.unregister();
+              } else {
+                reg.update();
               }
             }
           }).catch(function() {});
