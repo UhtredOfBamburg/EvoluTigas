@@ -23,6 +23,10 @@ export interface FormTemplate {
   id: string;
   name: string;
   ownerId?: string;
+  ownerName?: string;
+  isOfficial?: boolean;
+  isCommunity?: boolean;
+  sourceTemplateId?: string;
   category?: 'receita' | 'atestado' | 'guia' | 'exames' | 'outro';
   isBuiltIn?: boolean;
   pdfBase64: string;

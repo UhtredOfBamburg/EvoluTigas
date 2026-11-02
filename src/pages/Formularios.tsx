@@ -22,8 +22,12 @@ import {
   ChevronDown,
   Printer,
   Columns2,
+  Users,
+  Share2,
+  ShieldCheck,
 } from 'lucide-react';
-import { useFormTemplates } from '@/hooks/useFormTemplates';
+import { useFormTemplates, isOfficialTemplateOwner } from '@/hooks/useFormTemplates';
+import { useUser } from '@/contexts/UserContext';
 import { useEnfermariaPatients } from '@/hooks/useEnfermariaPatients';
 import { useAiGenerate } from '@/hooks/useAiGenerate';
 import { useToast } from '@/hooks/useToast';
@@ -86,12 +90,18 @@ export default function Formularios() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { generate } = useAiGenerate();
+  const { currentUser } = useUser();
   const {
     templates,
+    communityTemplates,
     saveTemplate,
     deleteTemplate,
     clearAllTemplates,
     renameTemplate,
+    publishToCommunity,
+    addCommunityTemplateToMyForms,
+    removeFromCommunity,
+    isTemplateInMyForms,
     getPresetsForForm,
     savePreset,
     deletePreset,
@@ -107,6 +117,8 @@ export default function Formularios() {
   const [isManagingTemplates, setIsManagingTemplates] = useState<boolean>(
     location.pathname.endsWith('/meus') || Boolean(locState.openManage)
   );
+  const [templatesPanelTab, setTemplatesPanelTab] = useState<'meus' | 'comunitigas'>('meus');
+  const [selectedPublishId, setSelectedPublishId] = useState<string>('');
   const [editingTplId, setEditingTplId] = useState<string | null>(null);
   const [editingTplName, setEditingTplName] = useState<string>('');
 
@@ -615,9 +627,36 @@ export default function Formularios() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsManagingTemplates((v) => !v)}
+              onClick={() => {
+                if (isManagingTemplates && templatesPanelTab === 'comunitigas') {
+                  setIsManagingTemplates(false);
+                } else {
+                  setTemplatesPanelTab('comunitigas');
+                  setIsManagingTemplates(true);
+                }
+              }}
               className={`text-xs border-slate-200 ${
-                isManagingTemplates
+                isManagingTemplates && templatesPanelTab === 'comunitigas'
+                  ? 'bg-teal-50 text-teal-800 border-teal-300'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 mr-1.5 text-teal-600" />
+              Documentos da Comunitigas ({communityTemplates.length})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (isManagingTemplates && templatesPanelTab === 'meus') {
+                  setIsManagingTemplates(false);
+                } else {
+                  setTemplatesPanelTab('meus');
+                  setIsManagingTemplates(true);
+                }
+              }}
+              className={`text-xs border-slate-200 ${
+                isManagingTemplates && templatesPanelTab === 'meus'
                   ? 'bg-teal-50 text-teal-800 border-teal-300'
                   : 'text-slate-700 hover:bg-slate-100'
               }`}
@@ -636,21 +675,41 @@ export default function Formularios() {
           </div>
         </div>
 
-        {/* Painel Unificado: Gerenciar Meus Moldes PDF */}
+        {/* Painel Unificado: Meus Moldes PDF & Documentos da Comunitigas */}
         {isManagingTemplates && (
           <Card className="border-teal-200 bg-slate-50/70 shadow-2xs">
             <CardContent className="p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900">
-                    Gerenciar Meus Moldes PDF ({templates.length})
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Selecione um molde para preencher, renomeie, ajuste as caixas ou exclua moldes antigos sem sair desta tela.
-                  </p>
+              {/* Abas do Painel */}
+              <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setTemplatesPanelTab('meus')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                      templatesPanelTab === 'meus'
+                        ? 'bg-teal-700 text-white shadow-2xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <FolderKanban className="w-3.5 h-3.5" />
+                    Meus Formulários ({templates.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemplatesPanelTab('comunitigas')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                      templatesPanelTab === 'comunitigas'
+                        ? 'bg-teal-700 text-white shadow-2xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    Documentos da Comunitigas ({communityTemplates.length})
+                  </button>
                 </div>
+
                 <div className="flex items-center gap-2">
-                  {templates.length > 0 && (
+                  {templatesPanelTab === 'meus' && templates.length > 0 && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -675,96 +734,284 @@ export default function Formularios() {
                 </div>
               </div>
 
-              {templates.length === 0 ? (
-                <div className="p-4 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-500">
-                  Nenhum molde PDF cadastrado ainda. Clique em <strong>Importar Novo PDF</strong> acima para mapear sua receita, pedido de exame, atestado ou AIH.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {templates.map((t) => (
-                    <div
-                      key={t.id}
-                      onClick={() => {
-                        setFormType(t.id);
-                      }}
-                      className={`p-3 rounded-lg border bg-white cursor-pointer transition-all flex flex-col justify-between gap-2 ${
-                        formType === t.id
-                          ? 'border-teal-500 ring-1 ring-teal-500/30'
-                          : 'border-slate-200 hover:border-teal-300'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        {editingTplId === t.id ? (
-                          <input
-                            autoFocus
-                            value={editingTplName}
-                            onChange={(e) => setEditingTplName(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.stopPropagation();
-                                if (editingTplName.trim()) {
-                                  renameTemplate(t.id, editingTplName.trim());
-                                }
-                                setEditingTplId(null);
-                              } else if (e.key === 'Escape') {
-                                e.stopPropagation();
-                                setEditingTplId(null);
-                              }
-                            }}
-                            onBlur={() => {
-                              if (editingTplName.trim()) {
-                                renameTemplate(t.id, editingTplName.trim());
-                              }
-                              setEditingTplId(null);
-                            }}
-                            className="w-full text-xs font-semibold text-slate-900 border-b border-teal-500 focus:outline-none bg-transparent"
-                          />
-                        ) : (
-                          <span className="text-xs font-semibold text-slate-900 truncate">
-                            {t.name}
-                          </span>
-                        )}
-                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              navigate('/formularios/novo', { state: { editTemplateId: t.id } })
-                            }
-                            className="px-1.5 py-0.5 text-[11px] font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 rounded"
-                            title="Ajustar caixas e campos no PDF"
-                          >
-                            Editar Caixas
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingTplId(t.id);
-                              setEditingTplName(t.name);
-                            }}
-                            className="p-1 text-slate-400 hover:text-teal-600"
-                            title="Renomear molde"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              deleteTemplate(t.id);
-                              toast(`"${t.name}" excluído.`, 'info');
-                            }}
-                            className="p-1 text-slate-400 hover:text-red-600"
-                            title="Excluir molde"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        {t.pages.length} pág. · {t.fields.length} campo(s) mapeado(s)
-                      </div>
+              {templatesPanelTab === 'meus' ? (
+                <>
+                  <p className="text-xs text-slate-500">
+                    Os formulários oficiais (@pdrtorres) já vêm incluídos automaticamente. Você pode selecionar qualquer molde para preencher, ajustar caixas ou compartilhar seus formulários na aba <strong>Documentos da Comunitigas</strong>.
+                  </p>
+
+                  {templates.length === 0 ? (
+                    <div className="p-4 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-500">
+                      Nenhum molde PDF na sua lista. Clique em <strong>Importar Novo PDF</strong> acima ou adicione moldes prontos na aba{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTemplatesPanelTab('comunitigas')}
+                        className="text-teal-700 font-semibold underline"
+                      >
+                        Documentos da Comunitigas
+                      </button>
+                      .
                     </div>
-                  ))}
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {templates.map((t) => {
+                        const isOfficial = Boolean(t.isOfficial || isOfficialTemplateOwner(t.ownerId));
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setFormType(t.id);
+                            }}
+                            className={`p-3 rounded-lg border bg-white cursor-pointer transition-all flex flex-col justify-between gap-2 ${
+                              formType === t.id
+                                ? 'border-teal-500 ring-1 ring-teal-500/30'
+                                : 'border-slate-200 hover:border-teal-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              {editingTplId === t.id ? (
+                                <input
+                                  autoFocus
+                                  value={editingTplName}
+                                  onChange={(e) => setEditingTplName(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.stopPropagation();
+                                      if (editingTplName.trim()) {
+                                        renameTemplate(t.id, editingTplName.trim());
+                                      }
+                                      setEditingTplId(null);
+                                    } else if (e.key === 'Escape') {
+                                      e.stopPropagation();
+                                      setEditingTplId(null);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (editingTplName.trim()) {
+                                      renameTemplate(t.id, editingTplName.trim());
+                                    }
+                                    setEditingTplId(null);
+                                  }}
+                                  className="w-full text-xs font-semibold text-slate-900 border-b border-teal-500 focus:outline-none bg-transparent"
+                                />
+                              ) : (
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-xs font-semibold text-slate-900 truncate block">
+                                    {t.name}
+                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                    {isOfficial ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-800 border border-teal-200">
+                                        <ShieldCheck className="w-3 h-3 text-teal-600" />
+                                        Oficial · pdrtorres
+                                      </span>
+                                    ) : t.isCommunity ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                                        <Users className="w-3 h-3 text-teal-600" />
+                                        Na Comunitigas
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await publishToCommunity(t, currentUser?.name || currentUser?.id);
+                                    toast(`"${t.name}" compartilhado em Documentos da Comunitigas!`, 'success');
+                                  }}
+                                  className="px-1.5 py-0.5 text-[11px] font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 rounded flex items-center gap-1"
+                                  title="Compartilhar este formulário na aba Documentos da Comunitigas para toda a turma"
+                                >
+                                  <Share2 className="w-3 h-3" />
+                                  Comunitigas
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    navigate('/formularios/novo', { state: { editTemplateId: t.id } })
+                                  }
+                                  className="px-1.5 py-0.5 text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded"
+                                  title="Ajustar caixas e campos no PDF"
+                                >
+                                  Editar Caixas
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingTplId(t.id);
+                                    setEditingTplName(t.name);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-teal-600"
+                                  title="Renomear molde"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    deleteTemplate(t.id);
+                                    toast(`"${t.name}" removido dos seus formulários.`, 'info');
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-red-600"
+                                  title="Remover molde"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {t.pages.length} pág. · {t.fields.length} campo(s) mapeado(s)
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* ABA: DOCUMENTOS DA COMUNITIGAS */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap bg-white border border-teal-200/80 rounded-lg p-3">
+                    <div className="space-y-0.5">
+                      <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-teal-600" />
+                        Documentos da Comunitigas — Repositório Colaborativo
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Aqui ficam os formulários oficiais do <strong>@pdrtorres</strong> e os documentos compartilhados pela comunidade. Qualquer usuário pode publicar um formulário criado ou adicionar os formulários abaixo aos seus próprios formulários.
+                      </p>
+                    </div>
+
+                    {templates.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select
+                          value={selectedPublishId}
+                          onChange={(e) => setSelectedPublishId(e.target.value)}
+                          className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        >
+                          <option value="">Escolher um dos meus formulários...</option>
+                          {templates.map((ut) => (
+                            <option key={ut.id} value={ut.id}>
+                              {ut.name}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={async () => {
+                            const target = templates.find((ut) => ut.id === (selectedPublishId || templates[0]?.id));
+                            if (!target) return;
+                            await publishToCommunity(target, currentUser?.name || currentUser?.id);
+                            setSelectedPublishId('');
+                            toast(`"${target.name}" publicado em Documentos da Comunitigas!`, 'success');
+                          }}
+                          className="h-8 text-xs bg-teal-600 hover:bg-teal-700 text-white"
+                        >
+                          <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                          Adicionar à Comunitigas
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {communityTemplates.length === 0 ? (
+                    <div className="p-4 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-500">
+                      Nenhum documento publicado na Comunitigas ainda. Use o seletor acima ou clique em <strong>Comunitigas</strong> em qualquer um dos seus formulários para compartilhar com a turma!
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {communityTemplates.map((ct) => {
+                        const isOfficial = Boolean(ct.isOfficial || isOfficialTemplateOwner(ct.ownerId));
+                        const alreadyInMyForms = isTemplateInMyForms(ct);
+                        const canRemoveFromComm =
+                          !isOfficial &&
+                          (ct.ownerId === currentUser?.id || isOfficialTemplateOwner(currentUser?.id));
+
+                        return (
+                          <div
+                            key={ct.id}
+                            className="p-3 rounded-lg border border-slate-200 hover:border-teal-300 bg-white transition-all flex flex-col justify-between gap-2.5"
+                          >
+                            <div className="space-y-1.5">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-xs font-bold text-slate-900 truncate">
+                                  {ct.name}
+                                </span>
+                                {canRemoveFromComm && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await removeFromCommunity(ct);
+                                      toast(`"${ct.name}" removido da Comunitigas.`, 'info');
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-red-600 shrink-0"
+                                    title="Remover da Comunitigas"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {isOfficial ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-800 border border-teal-200">
+                                    <ShieldCheck className="w-3 h-3 text-teal-600" />
+                                    Oficial · @pdrtorres
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                                    <Users className="w-3 h-3 text-slate-500" />
+                                    Por @{ct.ownerName || ct.ownerId || 'colega'}
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-400">
+                                  {ct.pages.length} pág. · {ct.fields.length} campo(s)
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const added = await addCommunityTemplateToMyForms(ct);
+                                  setFormType(added.id);
+                                  toast(`"${ct.name}" aberto para preenchimento!`, 'success');
+                                }}
+                                className="flex-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white transition-colors text-center"
+                              >
+                                Abrir e Preencher
+                              </button>
+
+                              {alreadyInMyForms ? (
+                                <span className="px-2.5 py-1.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0">
+                                  <Check className="w-3 h-3" />
+                                  Nos Meus Formulários
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const added = await addCommunityTemplateToMyForms(ct);
+                                    setFormType(added.id);
+                                    toast(`"${ct.name}" adicionado aos seus formulários!`, 'success');
+                                  }}
+                                  className="px-2.5 py-1.5 rounded text-xs font-semibold bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 transition-colors flex items-center gap-1 shrink-0"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  Adicionar aos Meus
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -773,7 +1020,6 @@ export default function Formularios() {
 
         {/* Form Switcher Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5">
-
           {templates.map((t) => (
             <button
               key={t.id}
@@ -788,6 +1034,18 @@ export default function Formularios() {
               {t.name}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              setTemplatesPanelTab('comunitigas');
+              setIsManagingTemplates(true);
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors border border-dashed border-teal-400 text-teal-800 bg-white hover:bg-teal-50 flex items-center gap-1.5"
+            title="Ver e adicionar formulários da Comunitigas"
+          >
+            <Users className="w-3.5 h-3.5 text-teal-600" />
+            + Documentos da Comunitigas ({communityTemplates.length})
+          </button>
         </div>
       </div>
 
