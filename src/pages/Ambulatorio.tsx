@@ -10,6 +10,8 @@ import { useAiGenerate, AiGenerateType } from '@/hooks/useAiGenerate';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { prepareFilesSequentially } from '@/lib/fileToBase64';
+import { sanitizeWinAnsi } from '@/lib/generateFilledPdf';
+import { copyToClipboard as safeCopyToClipboard } from '@/lib/utils';
 import { GoogleDocsConnector, LinkedGoogleDoc } from '@/components/GoogleDocsConnector';
 import type { GoogleDocExtracted } from '@/lib/googleDocs';
 import {
@@ -369,11 +371,11 @@ export default function Ambulatorio() {
   };
 
   const handleQuickDownloadDocPdf = (doc: InterpretedDoc) => {
-    const pdf = new jsPDF();
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     pdf.setFontSize(16);
-    pdf.text((doc.tipo || 'DOCUMENTO MÉDICO').toUpperCase(), 105, 25, { align: 'center' });
+    pdf.text(sanitizeWinAnsi((doc.tipo || 'DOCUMENTO MÉDICO').toUpperCase()), 105, 25, { align: 'center' });
     pdf.setFontSize(11);
-    pdf.text(`Paciente: ${selectedPatient?.nome || '_________________________________'}`, 20, 42);
+    pdf.text(sanitizeWinAnsi(`Paciente: ${selectedPatient?.nome || '_________________________________'}`), 20, 42);
     pdf.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 155, 42);
     pdf.line(20, 46, 190, 46);
 
@@ -390,12 +392,20 @@ export default function Ambulatorio() {
     }
 
     pdf.setFontSize(11);
-    const lines = pdf.splitTextToSize(bodyText.trim() || condutasBrutas, 170);
-    pdf.text(lines, 20, 58);
+    const lines = pdf.splitTextToSize(sanitizeWinAnsi(bodyText.trim() || condutasBrutas), 170);
+    let y = 58;
+    for (let i = 0; i < lines.length; i++) {
+      if (y > 245) {
+        pdf.addPage('a4', 'portrait');
+        y = 22;
+      }
+      pdf.text(lines[i], 20, y);
+      y += 5.5;
+    }
 
-    pdf.text('__________________________________', 105, 255, { align: 'center' });
+    pdf.text('__________________________________', 105, 265, { align: 'center' });
     pdf.setFontSize(10);
-    pdf.text('Assinatura e Carimbo Médico', 105, 262, { align: 'center' });
+    pdf.text('Assinatura e Carimbo Médico', 105, 272, { align: 'center' });
     pdf.save(`${(doc.titulo || doc.tipo || 'Documento').replace(/\s+/g, '_')}.pdf`);
     toast('PDF gerado com sucesso!', 'success');
   };
@@ -419,9 +429,13 @@ export default function Ambulatorio() {
     loadingSetter(false);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast('Copiado para área de transferência!', 'success');
+  const copyToClipboard = async (text: string) => {
+    const ok = await safeCopyToClipboard(text);
+    if (ok) {
+      toast('Copiado para área de transferência!', 'success');
+    } else {
+      toast('Não foi possível copiar automaticamente.', 'error');
+    }
   };
 
   if (view === 'workspace') {

@@ -40,7 +40,9 @@ import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 if (typeof globalThis !== 'undefined' && !(globalThis as any).pdfjsWorker) {
   (globalThis as any).pdfjsWorker = pdfjsWorkerModule;
 }
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+if (typeof pdfWorkerUrl === 'string') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+}
 
 export { pdfjsLib };
 

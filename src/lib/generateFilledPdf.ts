@@ -1,4 +1,5 @@
-import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
+import type { jsPDF as JsPDFType } from 'jspdf';
 import type { FormField, FormTemplate, MedicationItem } from '@/types/formTemplate';
 
 const CHECKED_VALUES = new Set(['true', 'sim', 'on', '1', 'x', 'yes', 'marcado']);
@@ -370,17 +371,39 @@ export function formatDateBr(isoOrBrDate: string): string {
   return isoOrBrDate;
 }
 
-/** Sanitizes text for WinAnsi (StandardFonts.Helvetica) so pdf-lib never crashes on unsupported glyphs. */
-function sanitizeWinAnsi(str: string): string {
-  return str
+/** Sanitizes text for WinAnsi (StandardFonts.Helvetica) so pdf-lib and jsPDF never crash or garble unsupported glyphs. */
+export function sanitizeWinAnsi(str: string): string {
+  return String(str || '')
     .replace(/\t/g, '  ')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/\u2022/g, '-')
     .replace(/\u2026/g, '...')
+    .replace(/≥/g, '>=')
+    .replace(/≤/g, '<=')
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/≠/g, '!=')
     // Remove characters outside Latin-1 / WinAnsi safe range
     .replace(/[^\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '');
+}
+
+const A4_PORTRAIT_W = 595.28;
+const A4_PORTRAIT_H = 841.89;
+const A4_LANDSCAPE_W = 841.89;
+const A4_LANDSCAPE_H = 595.28;
+
+/** Normalizes near-A4 page MediaBox & CropBox to standard A4 points for strict hospital printers. */
+function normalizeA4PageBox(page: PDFPage) {
+  const { width, height } = page.getSize();
+  if (Math.abs(width - A4_PORTRAIT_W) <= 3 && Math.abs(height - A4_PORTRAIT_H) <= 3) {
+    page.setMediaBox(0, 0, A4_PORTRAIT_W, A4_PORTRAIT_H);
+    page.setCropBox(0, 0, A4_PORTRAIT_W, A4_PORTRAIT_H);
+  } else if (Math.abs(width - A4_LANDSCAPE_W) <= 3 && Math.abs(height - A4_LANDSCAPE_H) <= 3) {
+    page.setMediaBox(0, 0, A4_LANDSCAPE_W, A4_LANDSCAPE_H);
+    page.setCropBox(0, 0, A4_LANDSCAPE_W, A4_LANDSCAPE_H);
+  }
 }
 
 /** Formats structured MedicationItem[] into the standardized Brazilian prescription text block. */
@@ -809,10 +832,27 @@ export async function generateFilledPdf(
     });
   }
 
-  const filledPdfBytes = await pdfDoc.save();
+  pages.forEach(normalizeA4PageBox);
+
+  // Use classic xref tables (useObjectStreams: false) so older hospital printers and print servers accept the PDF
+  const filledPdfBytes = await pdfDoc.save({
+    useObjectStreams: false,
+    updateFieldAppearances: false,
+  });
   if (!useHalfSheet) {
     return filledPdfBytes;
   }
+
+  const drawCenterCutLine = (targetPage: PDFPage, x: number, pageHeight: number) => {
+    for (let y = 14; y < pageHeight - 14; y += 8) {
+      targetPage.drawLine({
+        start: { x, y },
+        end: { x, y: Math.min(y + 4, pageHeight - 14) },
+        thickness: 0.6,
+        color: rgb(0.7, 0.73, 0.77),
+      });
+    }
+  };
 
   // Transform Receita Simples & Pedido de Exames into the A4 Landscape 2-Half layout
   // (like Receita de Controle Especial, with 1st half filled and 2nd half with blank information)
@@ -831,10 +871,9 @@ export async function generateFilledPdf(
     if (srcH >= srcW) {
       // Source page is Full-Page Portrait (e.g., A4 Portrait Receita Simples or Pedido de Exames):
       // Place 2 half-pages side-by-side on an A4 Landscape sheet (841.89 x 595.28 pts)
-      const A4_LANDSCAPE_W = 841.89;
-      const A4_LANDSCAPE_H = 595.28;
       const halfW = A4_LANDSCAPE_W / 2;
       const outPage = outDoc.addPage([A4_LANDSCAPE_W, A4_LANDSCAPE_H]);
+      normalizeA4PageBox(outPage);
 
       const scale = Math.min(halfW / srcW, A4_LANDSCAPE_H / srcH);
       const drawW = srcW * scale;
@@ -842,7 +881,6 @@ export async function generateFilledPdf(
       const offsetX = (halfW - drawW) / 2;
       const offsetY = (A4_LANDSCAPE_H - drawH) / 2;
 
-      // Left half: Filled form (1ª metade preenchida)
       const embeddedFilled = await outDoc.embedPage(filledPage);
       outPage.drawPage(embeddedFilled, {
         x: offsetX,
@@ -851,7 +889,6 @@ export async function generateFilledPdf(
         height: drawH,
       });
 
-      // Right half: Unfilled form template ("com as informações em branco") unless user chose empty white
       if (halfSheetMode === 'half_blank_form' && blankPage) {
         const embeddedBlank = await outDoc.embedPage(blankPage);
         outPage.drawPage(embeddedBlank, {
@@ -862,66 +899,125 @@ export async function generateFilledPdf(
         });
       }
 
-      // Dashed vertical cut line in the middle
-      for (let y = 14; y < A4_LANDSCAPE_H - 14; y += 8) {
-        outPage.drawLine({
-          start: { x: halfW, y },
-          end: { x: halfW, y: Math.min(y + 4, A4_LANDSCAPE_H - 14) },
-          thickness: 0.6,
-          color: rgb(0.7, 0.73, 0.77),
-        });
-      }
+      drawCenterCutLine(outPage, halfW, A4_LANDSCAPE_H);
     } else {
       // Source page is already Landscape (e.g., Pedido de Exames with left half form):
-      // Keep left half filled, and on the right half place the unfilled form template (or white if selected)
-      const halfW = srcW / 2;
-      const outPage = outDoc.addPage([srcW, srcH]);
+      // Clip strictly to the left half so hidden objects aren't left behind underneath a white box.
+      const srcHalfW = srcW / 2;
+      const outW = Math.abs(srcW - A4_LANDSCAPE_W) <= 3 ? A4_LANDSCAPE_W : srcW;
+      const outH = Math.abs(srcH - A4_LANDSCAPE_H) <= 3 ? A4_LANDSCAPE_H : srcH;
+      const outHalfW = outW / 2;
+      const outPage = outDoc.addPage([outW, outH]);
+      normalizeA4PageBox(outPage);
 
-      const embeddedFilled = await outDoc.embedPage(filledPage);
-      outPage.drawPage(embeddedFilled, {
+      const embeddedFilledLeftHalf = await outDoc.embedPage(filledPage, {
+        left: 0,
+        bottom: 0,
+        right: srcHalfW,
+        top: srcH,
+      });
+      outPage.drawPage(embeddedFilledLeftHalf, {
         x: 0,
         y: 0,
-        width: srcW,
-        height: srcH,
-      });
-
-      // Clear right half to ensure no stray marks
-      outPage.drawRectangle({
-        x: halfW,
-        y: 0,
-        width: halfW,
-        height: srcH,
-        color: rgb(1, 1, 1),
+        width: outHalfW,
+        height: outH,
       });
 
       if (halfSheetMode === 'half_blank_form' && blankPage) {
         const embeddedBlankLeftHalf = await outDoc.embedPage(blankPage, {
           left: 0,
           bottom: 0,
-          right: halfW,
+          right: srcHalfW,
           top: srcH,
         });
         outPage.drawPage(embeddedBlankLeftHalf, {
-          x: halfW,
+          x: outHalfW,
           y: 0,
-          width: halfW,
-          height: srcH,
+          width: outHalfW,
+          height: outH,
         });
       }
 
-      // Dashed vertical cut line in the middle
-      for (let y = 14; y < srcH - 14; y += 8) {
-        outPage.drawLine({
-          start: { x: halfW, y },
-          end: { x: halfW, y: Math.min(y + 4, srcH - 14) },
-          thickness: 0.6,
-          color: rgb(0.7, 0.73, 0.77),
-        });
-      }
+      drawCenterCutLine(outPage, outHalfW, outH);
     }
   }
 
-  return outDoc.save();
+  return outDoc.save({
+    useObjectStreams: false,
+    updateFieldAppearances: false,
+  });
+}
+
+/**
+ * Generates a 100% flattened PDF 1.3 (using jsPDF) with no transparency masks (/SMask),
+ * no nested Form XObjects, and no Object Streams — guaranteed to print on strict/legacy
+ * hospital network printers and CUPS/Windows print servers.
+ */
+export async function generateHospitalCompatiblePdf(pdfBytes: Uint8Array): Promise<Uint8Array> {
+  const [{ openPdfDocumentBytes, getSafeCanvasScale, isIOSDevice }, { jsPDF }] = await Promise.all([
+    import('@/lib/pdfRender'),
+    import('jspdf'),
+  ]);
+  const loadingTask = openPdfDocumentBytes(pdfBytes);
+  try {
+    const pdf = await loadingTask.promise;
+    const isIOS = isIOSDevice();
+    let outPdf: JsPDFType | null = null;
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const unscaled = page.getViewport({ scale: 1 });
+      const isLandscape = unscaled.width > unscaled.height;
+      const scale = getSafeCanvasScale(unscaled.width, unscaled.height, isIOS ? 2.0 : 2.6);
+      const viewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
+
+      canvas.width = 0;
+      canvas.height = 0;
+
+      const orientation = isLandscape ? 'landscape' : 'portrait';
+      const pageWmm = isLandscape ? 297 : 210;
+      const pageHmm = isLandscape ? 210 : 297;
+
+      if (!outPdf) {
+        outPdf = new jsPDF({
+          orientation,
+          unit: 'mm',
+          format: 'a4',
+          compress: true,
+        });
+      } else {
+        outPdf.addPage('a4', orientation);
+      }
+
+      const ratio = Math.min(pageWmm / unscaled.width, pageHmm / unscaled.height);
+      const drawW = unscaled.width * ratio;
+      const drawH = unscaled.height * ratio;
+      const offX = (pageWmm - drawW) / 2;
+      const offY = (pageHmm - drawH) / 2;
+
+      outPdf.addImage(dataUrl, 'JPEG', offX, offY, drawW, drawH, undefined, 'FAST');
+    }
+
+    if (!outPdf) {
+      return pdfBytes;
+    }
+    const arrBuf = outPdf.output('arraybuffer');
+    return new Uint8Array(arrBuf);
+  } finally {
+    await loadingTask.destroy().catch(() => {});
+  }
 }
 
 export function downloadPdfBytes(bytes: Uint8Array, filename: string) {

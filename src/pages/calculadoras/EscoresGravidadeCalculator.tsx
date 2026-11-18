@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label, Button } from '@/components/ui';
 import { Copy, Check, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
+import { copyToClipboard } from '@/lib/utils';
 
 export function EscoresGravidadeCalculator() {
   const { toast } = useToast();
@@ -87,8 +88,8 @@ export function EscoresGravidadeCalculator() {
     return { meldRaw, meldNa, mortality };
   }, [meldBilirrubina, meldInr, meldCreatinina, meldSodio, meldDialise]);
 
-  const copySummary = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copySummary = async (text: string) => {
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
     toast('Escore copiado para colar na evolução!', 'success');

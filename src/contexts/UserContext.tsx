@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { db, stripUndefined } from '@/lib/firebase';
-import { doc, getDoc, setDoc, collection, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, onSnapshot, query, where, documentId } from 'firebase/firestore';
 import {
   syncAllLocalWorkspaceWithCloud,
   subscribeWorkspaceFromCloud,
@@ -166,8 +166,11 @@ function simpleHash(str: string): string {
 }
 
 function getTodayKey(userId: string): string {
-  const today = new Date().toISOString().split('T')[0];
-  return `u_${userId}_ai_quota_${today}`;
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `u_${userId}_ai_quota_${yyyy}-${mm}-${dd}`;
 }
 
 function loadLocalRegistry(): Record<string, AppUser> {
@@ -303,56 +306,67 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentUser]);
 
-  // Real-time sync of knownUsers, active user AI keys & shared builtin key from Firestore
+  // Real-time sync ONLY of shared builtin key & user_profile__* docs (avoids downloading PDFs & patient workspaces)
   useEffect(() => {
-    const unsubscribe = onSnapshot(
+    const unsubSharedKey = onSnapshot(
+      doc(db, 'formTemplates', 'system_shared_ai_config'),
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const cfg = docSnap.data() as { geminiKey?: string } | undefined;
+        if (cfg && typeof cfg.geminiKey === 'string') {
+          const clean = cfg.geminiKey.trim();
+          try {
+            if (clean) {
+              localStorage.setItem(SHARED_BUILTIN_KEY_STORAGE, clean);
+            } else {
+              localStorage.removeItem(SHARED_BUILTIN_KEY_STORAGE);
+            }
+          } catch {}
+          setSharedBuiltinKey(clean || getBuiltinGeminiApiKey());
+        }
+      },
+      () => {}
+    );
+
+    const profilesQuery = query(
       collection(db, 'formTemplates'),
+      where(documentId(), '>=', 'user_profile__'),
+      where(documentId(), '<', 'user_profile__\uf8ff')
+    );
+
+    const unsubProfiles = onSnapshot(
+      profilesQuery,
       (snap) => {
         const reg = loadLocalRegistry();
         let changed = false;
         const activeUid = getActiveUserIdFromStorage();
 
         snap.forEach((docSnap) => {
-          if (docSnap.id === 'system_shared_ai_config') {
-            const cfg = docSnap.data() as { geminiKey?: string } | undefined;
-            if (cfg && typeof cfg.geminiKey === 'string') {
-              const clean = cfg.geminiKey.trim();
-              try {
-                if (clean) {
-                  localStorage.setItem(SHARED_BUILTIN_KEY_STORAGE, clean);
-                } else {
-                  localStorage.removeItem(SHARED_BUILTIN_KEY_STORAGE);
-                }
-              } catch {}
-              setSharedBuiltinKey(clean || getBuiltinGeminiApiKey());
-            }
-          } else if (docSnap.id.startsWith('user_profile__')) {
-            const data = docSnap.data() as AppUser;
-            if (data && data.id && data.name) {
-              const localAi = reg[data.id]?.aiConnections;
-              const mergedAi = mergeAiConnections(data.aiConnections, localAi);
-              reg[data.id] = {
-                ...reg[data.id],
-                ...data,
-                aiConnections: mergedAi,
-              };
-              changed = true;
+          const data = docSnap.data() as AppUser;
+          if (data && data.id && data.name) {
+            const localAi = reg[data.id]?.aiConnections;
+            const mergedAi = mergeAiConnections(data.aiConnections, localAi);
+            reg[data.id] = {
+              ...reg[data.id],
+              ...data,
+              aiConnections: mergedAi,
+            };
+            changed = true;
 
-              if (activeUid && data.id === activeUid) {
-                setCurrentUser((prev) => {
-                  if (!prev || prev.id !== activeUid) return prev;
-                  const nextAi = mergeAiConnections(data.aiConnections, prev.aiConnections);
-                  const nextUser: AppUser = {
-                    ...prev,
-                    ...data,
-                    aiConnections: nextAi,
-                  };
-                  try {
-                    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(nextUser));
-                  } catch {}
-                  return nextUser;
-                });
-              }
+            if (activeUid && data.id === activeUid) {
+              setCurrentUser((prev) => {
+                if (!prev || prev.id !== activeUid) return prev;
+                const nextAi = mergeAiConnections(data.aiConnections, prev.aiConnections);
+                const nextUser: AppUser = {
+                  ...prev,
+                  ...data,
+                  aiConnections: nextAi,
+                };
+                try {
+                  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(nextUser));
+                } catch {}
+                return nextUser;
+              });
             }
           }
         });
@@ -363,7 +377,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       },
       () => {}
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubSharedKey();
+      unsubProfiles();
+    };
   }, []);
 
   const updateSharedBuiltinKey = useCallback(async (key: string) => {

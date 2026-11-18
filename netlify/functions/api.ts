@@ -1,74 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
 import {
-  ALL_KNOWN_TYPES,
-  MULTIMODAL_TYPES,
-  buildPrompt,
-  buildTranscritorPrompt,
-  postProcessTranscritorOutput,
-  buildFieldDetectionPrompt,
-  buildAutoFieldDetectionPrompt,
-  buildFormAutoFillPrompt,
-} from '../../server/prompts';
-
-const JSON_RESPONSE_TYPES = new Set([
-  'detectar-campos-pdf',
-  'auto-detectar-campos-pdf',
-  'preencher-formulario-ia',
-  'interpretar-condutas',
-]);
-
-function sanitizeInlineData(item: any) {
-  if (!item || typeof item !== 'object') return null;
-  let data = typeof item.data === 'string' ? item.data : '';
-  let detectedMime = item.mimeType && typeof item.mimeType === 'string' ? item.mimeType.trim() : '';
-  if (data.startsWith('data:')) {
-    const match = data.match(/^data:([^;]+);base64,(.+)$/s);
-    if (match) {
-      if (!detectedMime) detectedMime = match[1];
-      data = match[2];
-    }
-  } else if (data.includes(',')) {
-    data = data.split(',')[1];
-  }
-  data = data.replace(/\s+/g, '');
-  if (!data || data.length < 16) return null;
-
-  let mimeType = detectedMime || 'image/jpeg';
-  if (
-    mimeType === 'image/heic' ||
-    mimeType === 'image/heif' ||
-    mimeType === 'application/octet-stream'
-  ) {
-    mimeType = 'image/jpeg';
-  }
-  return { mimeType, data };
-}
-
-function resolveGeminiCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim();
-  const normalized =
-    pref === 'gemini-2.5-pro' || pref === 'argon'
-      ? 'gemini-4-argon'
-      : pref === 'gemini-2.5-flash' || pref === 'gemini-2.0-flash' || !pref
-      ? 'gemini-3.8-flash'
-      : pref === 'gemini-2.5-flash-lite'
-      ? 'gemini-3.1-flash-lite'
-      : pref;
-
-  return Array.from(
-    new Set([
-      normalized,
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-flash-lite-latest',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-latest',
-      'gemini-4-argon',
-    ])
-  );
-}
+  prepareAiRequestContent,
+  finalizeAiOutput,
+  resolveGeminiCandidateModels,
+  markModelTemporarilyBlocked,
+  markModelHealthy,
+  withTimeout,
+  generateWithChatGpt,
+  generateWithClaude,
+} from '../../server/aiShared';
 
 async function generateWithGeminiFallback(
   aiClient: GoogleGenAI,
@@ -88,203 +28,28 @@ async function generateWithGeminiFallback(
     }
 
     try {
-      return await aiClient.models.generateContent({
-        model: modelName,
-        contents,
-        config: baseConfig,
-      });
+      const response = await withTimeout(
+        aiClient.models.generateContent({
+          model: modelName,
+          contents,
+          config: baseConfig,
+        }),
+        8500,
+        modelName
+      );
+      markModelHealthy(modelName);
+      return response;
     } catch (err: any) {
       lastError = err;
+      markModelTemporarilyBlocked(modelName);
+      const msg = String(err?.message || err || '');
+      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        break;
+      }
     }
   }
 
   throw lastError || new Error('Não foi possível gerar resposta com o Gemini.');
-}
-
-async function generateWithChatGpt(
-  apiKey: string,
-  model: string,
-  promptText: string,
-  images: Array<{ mimeType: string; data: string }>,
-  isJsonResponse: boolean
-): Promise<string> {
-  const pref = (model || '').trim() || 'gpt-5.6-sol';
-  const candidateModels = Array.from(
-    new Set([pref, 'gpt-5.6-sol', 'gpt-5', 'o3', 'gpt-4o', 'gpt-4o-mini'])
-  );
-
-  const contentParts: any[] = [];
-  for (const img of images) {
-    contentParts.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.data}`,
-      },
-    });
-  }
-  contentParts.push({
-    type: 'text',
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido.`
-      : promptText,
-  });
-
-  let lastErrorMsg = '';
-
-  for (const candidate of candidateModels) {
-    const isReasoningModel = candidate.startsWith('o1') || candidate.startsWith('o3');
-    const body: Record<string, any> = {
-      model: candidate,
-      messages: [
-        {
-          role: 'user',
-          content: images.length > 0 ? contentParts : contentParts[0].text,
-        },
-      ],
-      ...(isReasoningModel ? {} : { temperature: isJsonResponse ? 0.1 : 0.25 }),
-    };
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey.trim()}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return data?.choices?.[0]?.message?.content || '';
-    }
-
-    let errText = '';
-    let errCode = '';
-    try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || '';
-      errCode = errJson?.error?.code || '';
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
-
-    const isModelUnavailable =
-      response.status === 404 ||
-      errCode === 'model_not_found' ||
-      errText.toLowerCase().includes('model') ||
-      errText.toLowerCase().includes('does not exist');
-
-    if (!isModelUnavailable) {
-      break;
-    }
-  }
-
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no ChatGPT (OpenAI): ${lastErrorMsg}`
-      : 'Erro na conexão com ChatGPT. Verifique sua chave nas configurações de IA.'
-  );
-}
-
-async function generateWithClaude(
-  apiKey: string,
-  model: string,
-  promptText: string,
-  images: Array<{ mimeType: string; data: string }>,
-  isJsonResponse: boolean
-): Promise<string> {
-  const pref = (model || '').trim() || 'claude-opus-5-5';
-  const candidateModels = Array.from(
-    new Set([
-      pref,
-      'claude-opus-5-5',
-      'claude-sonnet-4-5',
-      'claude-3-7-sonnet-latest',
-      'claude-3-5-sonnet-latest',
-      'claude-3-5-haiku-latest',
-    ])
-  );
-
-  const contentBlocks: any[] = [];
-  for (const img of images) {
-    const allowedMedia = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const mediaType = allowedMedia.includes(img.mimeType) ? img.mimeType : 'image/jpeg';
-    contentBlocks.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: mediaType,
-        data: img.data,
-      },
-    });
-  }
-
-  contentBlocks.push({
-    type: 'text',
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido, sem markdown nem texto adicional.`
-      : promptText,
-  });
-
-  let lastErrorMsg = '';
-
-  for (const candidate of candidateModels) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: candidate,
-        max_tokens: 4096,
-        temperature: isJsonResponse ? 0.1 : 0.25,
-        messages: [
-          {
-            role: 'user',
-            content: contentBlocks,
-          },
-        ],
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const blocks = Array.isArray(data?.content) ? data.content : [];
-      return blocks
-        .filter((b: any) => b.type === 'text' && typeof b.text === 'string')
-        .map((b: any) => b.text)
-        .join('\n');
-    }
-
-    let errText = '';
-    let errType = '';
-    try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || '';
-      errType = errJson?.error?.type || '';
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
-
-    const isModelUnavailable =
-      response.status === 404 ||
-      errType === 'not_found_error' ||
-      errText.toLowerCase().includes('model');
-
-    if (!isModelUnavailable) {
-      break;
-    }
-  }
-
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no Claude (Anthropic): ${lastErrorMsg}`
-      : 'Erro na conexão com o Claude. Verifique sua chave nas configurações de IA.'
-  );
 }
 
 function jsonResponse(statusCode: number, data: Record<string, any>) {
@@ -337,6 +102,7 @@ export async function handler(event: any) {
           model || 'claude-opus-5-5',
           'Responda apenas com a palavra: CONECTADO',
           [],
+          false,
           false
         );
         return jsonResponse(200, { ok: true, provider: 'claude', sample: reply.trim().slice(0, 60) });
@@ -448,65 +214,19 @@ export async function handler(event: any) {
 
   // 3. /api/generate-evolucao
   if (pathStr.endsWith('/generate-evolucao')) {
-    const {
-      type,
-      formData,
-      inlineData,
-      inlineDatas,
-      customPrompt,
-      outputFormat,
-      fieldLabels,
-      alreadyFound,
-      formFields,
-      aiProviderConfig,
-    } = body;
+    const { type, outputFormat, aiProviderConfig } = body;
 
-    if (typeof type !== 'string' || !ALL_KNOWN_TYPES.includes(type)) {
-      return jsonResponse(400, {
-        error: `Invalid or missing "type". Expected one of: ${ALL_KNOWN_TYPES.join(', ')}.`,
-      });
+    let prepared;
+    try {
+      prepared = prepareAiRequestContent(body);
+    } catch (err: any) {
+      return jsonResponse(400, { error: err?.message || 'Requisição inválida.' });
     }
 
-    const isMultimodal = (MULTIMODAL_TYPES as readonly string[]).includes(type);
-    const isJsonResponse = JSON_RESPONSE_TYPES.has(type);
-
-    let promptText = '';
-    const sanitizedImages: Array<{ mimeType: string; data: string }> = [];
-
-    if (isMultimodal) {
-      if (type === 'detectar-campos-pdf') {
-        promptText = buildFieldDetectionPrompt(
-          fieldLabels,
-          Array.isArray(alreadyFound) ? alreadyFound : []
-        );
-      } else if (type === 'auto-detectar-campos-pdf') {
-        promptText = buildAutoFieldDetectionPrompt();
-      } else if (type === 'preencher-formulario-ia') {
-        promptText = buildFormAutoFillPrompt(formFields, customPrompt);
-      } else {
-        promptText = buildTranscritorPrompt(customPrompt, outputFormat);
-      }
-
-      if (inlineData) {
-        const sanitized = sanitizeInlineData(inlineData);
-        if (sanitized) sanitizedImages.push(sanitized);
-      }
-      if (Array.isArray(inlineDatas)) {
-        inlineDatas.forEach((data: any) => {
-          const sanitized = sanitizeInlineData(data);
-          if (sanitized) sanitizedImages.push(sanitized);
-        });
-      }
-    } else {
-      promptText = buildPrompt(type, formData);
-    }
-
+    const { promptText, sanitizedImages, isJsonResponse } = prepared;
     const provider = aiProviderConfig?.provider || 'builtin';
     const userApiKey = typeof aiProviderConfig?.apiKey === 'string' ? aiProviderConfig.apiKey.trim() : '';
     const userModel = typeof aiProviderConfig?.model === 'string' ? aiProviderConfig.model.trim() : '';
-
-    const finalizeText = (raw: string) =>
-      type === 'transcritor-exames' ? postProcessTranscritorOutput(raw, outputFormat) : raw;
 
     try {
       if (provider === 'chatgpt' && userApiKey) {
@@ -517,7 +237,7 @@ export async function handler(event: any) {
           sanitizedImages,
           isJsonResponse
         );
-        return jsonResponse(200, { text: finalizeText(resultText), provider: 'chatgpt' });
+        return jsonResponse(200, { text: finalizeAiOutput(type, resultText, outputFormat), provider: 'chatgpt' });
       }
 
       if (provider === 'claude' && userApiKey) {
@@ -526,9 +246,10 @@ export async function handler(event: any) {
           userModel || 'claude-opus-5-5',
           promptText,
           sanitizedImages,
-          isJsonResponse
+          isJsonResponse,
+          false
         );
-        return jsonResponse(200, { text: finalizeText(resultText), provider: 'claude' });
+        return jsonResponse(200, { text: finalizeAiOutput(type, resultText, outputFormat), provider: 'claude' });
       }
 
       const envKey = process.env.GEMINI_API_KEY || '';
@@ -577,7 +298,7 @@ export async function handler(event: any) {
           .join('\n') ||
         '';
       return jsonResponse(200, {
-        text: finalizeText(resultText),
+        text: finalizeAiOutput(type, resultText, outputFormat),
         provider: provider === 'gemini' ? 'gemini' : 'builtin',
       });
     } catch (error: any) {

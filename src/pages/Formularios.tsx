@@ -31,6 +31,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useEnfermariaPatients } from '@/hooks/useEnfermariaPatients';
 import { useAiGenerate } from '@/hooks/useAiGenerate';
 import { useToast } from '@/hooks/useToast';
+import { copyToClipboard } from '@/lib/utils';
 import {
   generateFilledPdf,
   downloadPdfBytes,
@@ -282,14 +283,22 @@ export default function Formularios() {
     });
   }, [medications, prescricaoMode, activeTemplate]);
 
-  // Auto-update Atestado body text when nome, dias, or cid change on the built-in atestado form
+  // Auto-update Atestado body text only when it still matches the auto-generated template
+  const lastAutoAtestadoRef = useRef<string>('');
   useEffect(() => {
     if (activeTemplate?.id !== 'atestado') return;
     const pName = templateValues.nome || '_____________________________________';
     const dias = templateValues.dias || '____';
     const cidPart = templateValues.cid ? ` (CID-10: ${templateValues.cid})` : '';
     const autoText = `Atesto para os devidos fins que o(a) paciente ${pName} foi atendido(a) nesta unidade de saúde e necessita de ${dias} dia(s) de afastamento de suas atividades habituais por motivo de doença${cidPart}.`;
-    setTemplateValues((prev) => ({ ...prev, textoAtestado: autoText }));
+    setTemplateValues((prev) => {
+      const currentBody = prev.textoAtestado || '';
+      if (currentBody && currentBody !== lastAutoAtestadoRef.current && !currentBody.includes('_____________________________________') && !currentBody.includes('____ dia(s)')) {
+        return prev;
+      }
+      lastAutoAtestadoRef.current = autoText;
+      return { ...prev, textoAtestado: autoText };
+    });
   }, [activeTemplate?.id, templateValues.nome, templateValues.dias, templateValues.cid]);
 
   // Real-time PDF generation into live viewer
@@ -576,7 +585,7 @@ export default function Formularios() {
     }
   };
 
-  const handleCopyAllText = () => {
+  const handleCopyAllText = async () => {
     if (!activeTemplate) return;
     const summary = fieldGroups
       .map((g) => {
@@ -590,10 +599,14 @@ export default function Formularios() {
       toast('Nenhum campo preenchido para copiar.', 'info');
       return;
     }
-    navigator.clipboard.writeText(summary);
-    setCopiedText(true);
-    setTimeout(() => setCopiedText(false), 1800);
-    toast('Conteúdo copiado para a área de transferência!', 'success');
+    const ok = await copyToClipboard(summary);
+    if (ok) {
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 1800);
+      toast('Conteúdo copiado para a área de transferência!', 'success');
+    } else {
+      toast('Não foi possível copiar automaticamente.', 'error');
+    }
   };
 
   const formPresets = activeTemplate ? getPresetsForForm(activeTemplate.id) : [];

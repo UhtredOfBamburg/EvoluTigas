@@ -173,7 +173,9 @@ export default function CriarFormulario() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== 'application/pdf') {
+    const isPdfFile =
+      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdfFile) {
       toast('Por favor, envie um arquivo PDF.', 'error');
       return;
     }

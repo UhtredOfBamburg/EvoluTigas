@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label, Button } from '@/components/ui';
 import { Copy, Check, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
+import { copyToClipboard } from '@/lib/utils';
 
 export function FuncaoRenalCalculator() {
   const { toast } = useToast();
@@ -91,12 +92,12 @@ export function FuncaoRenalCalculator() {
     };
   }, [creatinina, idade, peso, altura, sexo]);
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!results) return;
     const text = `Função Renal (Cr ${creatinina} mg/dL): TFGe (CKD-EPI 2021) = ${results.ckdEpi} mL/min/1,73m² (${results.stage})${
       results.cgTotal ? ` | ClCr (Cockcroft-Gault) = ${results.cgTotal} mL/min` : ''
     }`;
-    navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
     toast('Resultado copiado para colar na evolução!', 'success');

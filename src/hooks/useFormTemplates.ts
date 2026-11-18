@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { FormTemplate, SavedFormPreset } from '@/types/formTemplate';
 import { db, stripUndefined } from '@/lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where, documentId } from 'firebase/firestore';
 import { getActiveUserIdFromStorage } from '@/contexts/UserContext';
 import { writeScopedLocalStorage } from '@/hooks/useLocalStorage';
 
@@ -201,7 +201,8 @@ export function useFormTemplates() {
     setPresets(loadLocalPresets(uid));
     const legacyOwnerId = localStorage.getItem(LEGACY_MIGRATED_KEY);
 
-    const q = collection(db, COLLECTION_NAME);
+    // Filter out user_profile__* and user_workspace__* on Firestore server side so colleague edits don't trigger full-PDF re-reads
+    const q = query(collection(db, COLLECTION_NAME), where(documentId(), '<', 'user_'));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {

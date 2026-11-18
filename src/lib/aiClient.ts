@@ -1,17 +1,22 @@
+import { GoogleGenAI } from '@google/genai';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import {
-  ALL_KNOWN_TYPES,
-  MULTIMODAL_TYPES,
-  buildPrompt,
-  buildTranscritorPrompt,
-  postProcessTranscritorOutput,
-  buildFieldDetectionPrompt,
-  buildAutoFieldDetectionPrompt,
-  buildFormAutoFillPrompt,
-} from '../../server/prompts';
+  SanitizedImage,
+  prepareAiRequestContent,
+  finalizeAiOutput,
+  resolveGeminiCandidateModels,
+  markModelTemporarilyBlocked,
+  markModelHealthy,
+  withTimeout,
+  generateWithChatGpt,
+  generateWithClaude,
+} from '../../server/aiShared';
 
 export const SHARED_BUILTIN_KEY_STORAGE = 'evolutigas_global_builtin_gemini_key_v1';
+
+export type { SanitizedImage };
+export { sanitizeInlineData } from '../../server/aiShared';
 
 export function reportClientErrorToCloud(context: string, err: unknown, extra?: Record<string, any>) {
   try {
@@ -36,45 +41,6 @@ export function reportClientErrorToCloud(context: string, err: unknown, extra?: 
   }
 }
 
-const JSON_RESPONSE_TYPES = new Set([
-  'detectar-campos-pdf',
-  'auto-detectar-campos-pdf',
-  'preencher-formulario-ia',
-  'interpretar-condutas',
-]);
-
-export interface SanitizedImage {
-  mimeType: string;
-  data: string;
-}
-
-export function sanitizeInlineData(item: any): SanitizedImage | null {
-  if (!item || typeof item !== 'object') return null;
-  let data = typeof item.data === 'string' ? item.data : '';
-  let detectedMime = item.mimeType && typeof item.mimeType === 'string' ? item.mimeType.trim() : '';
-  if (data.startsWith('data:')) {
-    const match = data.match(/^data:([^;]+);base64,(.+)$/s);
-    if (match) {
-      if (!detectedMime) detectedMime = match[1];
-      data = match[2];
-    }
-  } else if (data.includes(',')) {
-    data = data.split(',')[1];
-  }
-  data = data.replace(/\s+/g, '');
-  if (!data || data.length < 16) return null;
-
-  let mimeType = detectedMime || 'image/jpeg';
-  if (
-    mimeType === 'image/heic' ||
-    mimeType === 'image/heif' ||
-    mimeType === 'application/octet-stream'
-  ) {
-    mimeType = 'image/jpeg';
-  }
-  return { mimeType, data };
-}
-
 export function getBuiltinGeminiApiKey(): string {
   try {
     if (typeof window !== 'undefined') {
@@ -86,203 +52,101 @@ export function getBuiltinGeminiApiKey(): string {
   } catch {
     // ignore storage errors
   }
-
   return '';
 }
 
-function resolveChatGptCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim() || 'gpt-5.6-sol';
-  return Array.from(
-    new Set([pref, 'gpt-5.6-sol', 'gpt-5', 'o3', 'gpt-4o', 'gpt-4o-mini'])
-  );
-}
-
-function resolveClaudeCandidateModels(preferredModel?: string): string[] {
-  const pref = (preferredModel || '').trim() || 'claude-opus-5-5';
-  return Array.from(
-    new Set([
-      pref,
-      'claude-opus-5-5',
-      'claude-sonnet-4-5',
-      'claude-3-7-sonnet-latest',
-      'claude-3-5-sonnet-latest',
-      'claude-3-5-haiku-latest',
-    ])
-  );
-}
-
-export async function generateWithChatGptClient(
+export async function generateWithGeminiClient(
   apiKey: string,
-  model: string | undefined,
   promptText: string,
   images: SanitizedImage[],
-  isJsonResponse: boolean
+  isJsonResponse: boolean,
+  preferredModel?: string
 ): Promise<string> {
-  const candidateModels = resolveChatGptCandidateModels(model);
+  const aiClient = new GoogleGenAI({ apiKey: apiKey.trim() });
+  const candidates = resolveGeminiCandidateModels(preferredModel);
 
-  const contentParts: any[] = [];
-  for (const img of images) {
-    contentParts.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.data}`,
-      },
-    });
-  }
-  contentParts.push({
-    type: 'text',
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido.`
-      : promptText,
-  });
-
-  let lastErrorMsg = '';
-
-  for (const candidate of candidateModels) {
-    const isReasoningModel = candidate.startsWith('o1') || candidate.startsWith('o3');
-    const body: Record<string, any> = {
-      model: candidate,
-      messages: [
-        {
-          role: 'user',
-          content: images.length > 0 ? contentParts : contentParts[0].text,
-        },
-      ],
-      ...(isReasoningModel ? {} : { temperature: isJsonResponse ? 0.1 : 0.25 }),
-    };
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey.trim()}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return data?.choices?.[0]?.message?.content || '';
-    }
-
-    let errText = '';
-    let errCode = '';
-    try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || '';
-      errCode = errJson?.error?.code || '';
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
-
-    const isModelUnavailable =
-      response.status === 404 ||
-      errCode === 'model_not_found' ||
-      errText.toLowerCase().includes('model') ||
-      errText.toLowerCase().includes('does not exist');
-
-    if (!isModelUnavailable) {
-      break;
-    }
-  }
-
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no ChatGPT (OpenAI): ${lastErrorMsg}`
-      : 'Erro na conexão com ChatGPT. Verifique sua chave nas configurações de IA.'
-  );
-}
-
-export async function generateWithClaudeClient(
-  apiKey: string,
-  model: string | undefined,
-  promptText: string,
-  images: SanitizedImage[],
-  isJsonResponse: boolean
-): Promise<string> {
-  const candidateModels = resolveClaudeCandidateModels(model);
-
-  const contentBlocks: any[] = [];
-  for (const img of images) {
-    const allowedMedia = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const mediaType = allowedMedia.includes(img.mimeType) ? img.mimeType : 'image/jpeg';
-    contentBlocks.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: mediaType,
-        data: img.data,
-      },
-    });
-  }
-
-  contentBlocks.push({
-    type: 'text',
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido, sem markdown nem texto adicional.`
-      : promptText,
-  });
-
-  let lastErrorMsg = '';
-
-  for (const candidate of candidateModels) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: candidate,
-        max_tokens: 4096,
-        temperature: isJsonResponse ? 0.1 : 0.25,
-        messages: [
+  const contents =
+    images.length > 0
+      ? [
           {
             role: 'user',
-            content: contentBlocks,
+            parts: [...images.map((img) => ({ inlineData: img })), { text: promptText }],
           },
-        ],
-      }),
-    });
+        ]
+      : promptText;
 
-    if (response.ok) {
-      const data = await response.json();
-      const blocks = Array.isArray(data?.content) ? data.content : [];
-      return blocks
-        .filter((b: any) => b.type === 'text' && typeof b.text === 'string')
-        .map((b: any) => b.text)
-        .join('\n');
+  let firstError: any = null;
+
+  for (const modelName of candidates) {
+    const baseConfig: Record<string, any> = {
+      temperature: isJsonResponse ? 0.1 : 0.25,
+    };
+    if (isJsonResponse) {
+      baseConfig.responseMimeType = 'application/json';
     }
 
-    let errText = '';
-    let errType = '';
     try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || '';
-      errType = errJson?.error?.type || '';
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
+      const response = await withTimeout(
+        aiClient.models.generateContent({
+          model: modelName,
+          contents,
+          config: baseConfig,
+        }),
+        22000,
+        modelName
+      );
 
-    const isModelUnavailable =
-      response.status === 404 ||
-      errType === 'not_found_error' ||
-      errText.toLowerCase().includes('model');
+      const resultText =
+        response.text ||
+        response.candidates?.[0]?.content?.parts
+          ?.map((p) => (p as any).text)
+          .filter(Boolean)
+          .join('\n') ||
+        '';
 
-    if (!isModelUnavailable) {
-      break;
+      if (resultText.trim()) {
+        markModelHealthy(modelName);
+        return resultText;
+      }
+    } catch (err: any) {
+      if (!firstError) firstError = err;
+      markModelTemporarilyBlocked(modelName);
+      const msg = String(err?.message || err || '');
+      console.warn(`[AI Client] Gemini model "${modelName}" failed:`, msg);
+      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        break;
+      }
     }
   }
 
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no Claude (Anthropic): ${lastErrorMsg}`
-      : 'Erro na conexão com o Claude. Verifique sua chave nas configurações de IA.'
-  );
+  reportClientErrorToCloud('generateWithGeminiClient', firstError, { preferredModel });
+  throw firstError || new Error('Não foi possível gerar resposta com o Google Gemini.');
+}
+
+async function testViaBackend(
+  provider: 'claude' | 'chatgpt' | 'gemini',
+  apiKey: string,
+  model?: string
+): Promise<{ ok: boolean; sample?: string; error?: string } | null> {
+  try {
+    const res = await fetch('/api/test-ai-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, apiKey, model }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return null;
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      return { ok: true, sample: data.sample };
+    }
+    if (data.error) {
+      return { ok: false, error: data.error };
+    }
+  } catch {
+    // ignore backend fallback network error
+  }
+  return null;
 }
 
 export async function testAiProviderDirect(
@@ -295,40 +159,9 @@ export async function testAiProviderDirect(
     return { ok: false, error: 'Insira a chave de acesso para testar a conexão.' };
   }
 
-  if (provider === 'gemini') {
-    try {
-      const res = await fetch('/api/test-ai-provider', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: cleanKey, model }),
-      });
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await res.json();
-        if (res.ok && data.ok) {
-          return { ok: true, sample: data.sample };
-        }
-        if (data.error) {
-          return { ok: false, error: data.error };
-        }
-      }
-      return {
-        ok: false,
-        error: 'Não foi possível conectar com o Google Gemini. Verifique se a chave está correta.',
-      };
-    } catch (err: any) {
-      return {
-        ok: false,
-        error:
-          err?.message ||
-          'Não foi possível conectar com o Google Gemini. Verifique sua conexão.',
-      };
-    }
-  }
-
   try {
     if (provider === 'chatgpt') {
-      const reply = await generateWithChatGptClient(
+      const reply = await generateWithChatGpt(
         cleanKey,
         model,
         'Responda apenas com a palavra: CONECTADO',
@@ -339,35 +172,30 @@ export async function testAiProviderDirect(
     }
 
     if (provider === 'claude') {
-      const reply = await generateWithClaudeClient(
+      const reply = await generateWithClaude(
         cleanKey,
         model,
         'Responda apenas com a palavra: CONECTADO',
         [],
-        false
+        false,
+        true
+      );
+      return { ok: true, sample: reply.trim().slice(0, 60) };
+    }
+
+    if (provider === 'gemini') {
+      const reply = await generateWithGeminiClient(
+        cleanKey,
+        'Responda apenas com a palavra: CONECTADO',
+        [],
+        false,
+        model
       );
       return { ok: true, sample: reply.trim().slice(0, 60) };
     }
   } catch (directErr: any) {
-    try {
-      const res = await fetch('/api/test-ai-provider', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: cleanKey, model }),
-      });
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await res.json();
-        if (res.ok && data.ok) {
-          return { ok: true, sample: data.sample };
-        }
-        if (data.error) {
-          return { ok: false, error: data.error };
-        }
-      }
-    } catch {
-      // Ignore fallback error and return direct error
-    }
+    const backendResult = await testViaBackend(provider, cleanKey, model);
+    if (backendResult) return backendResult;
 
     return {
       ok: false,
@@ -400,89 +228,68 @@ export interface ExecuteAiPayload {
 export async function executeAiGeneration(
   payload: ExecuteAiPayload
 ): Promise<{ text: string; provider: string }> {
-  const {
-    type,
-    formData,
-    inlineData,
-    inlineDatas,
-    customPrompt,
-    outputFormat,
-    fieldLabels,
-    alreadyFound,
-    formFields,
-    aiProviderConfig,
-  } = payload;
-
-  if (!ALL_KNOWN_TYPES.includes(type)) {
-    throw new Error(`Tipo de geração inválido: ${type}`);
-  }
-
-  const isMultimodal = (MULTIMODAL_TYPES as readonly string[]).includes(type);
-  const isJsonResponse = JSON_RESPONSE_TYPES.has(type);
-
-  let promptText = '';
-  const sanitizedImages: SanitizedImage[] = [];
-
-  if (isMultimodal) {
-    if (type === 'detectar-campos-pdf') {
-      promptText = buildFieldDetectionPrompt(
-        fieldLabels || [],
-        Array.isArray(alreadyFound) ? alreadyFound : []
-      );
-    } else if (type === 'auto-detectar-campos-pdf') {
-      promptText = buildAutoFieldDetectionPrompt();
-    } else if (type === 'preencher-formulario-ia') {
-      promptText = buildFormAutoFillPrompt(formFields || [], customPrompt);
-    } else {
-      promptText = buildTranscritorPrompt(customPrompt, outputFormat);
-    }
-
-    if (inlineData) {
-      const sanitized = sanitizeInlineData(inlineData);
-      if (sanitized) sanitizedImages.push(sanitized);
-    }
-    if (Array.isArray(inlineDatas)) {
-      inlineDatas.forEach((item) => {
-        const sanitized = sanitizeInlineData(item);
-        if (sanitized) sanitizedImages.push(sanitized);
-      });
-    }
-  } else {
-    promptText = buildPrompt(type, formData);
-  }
+  const { type, outputFormat, aiProviderConfig } = payload;
+  const { promptText, sanitizedImages, isJsonResponse } = prepareAiRequestContent(payload);
 
   const provider = aiProviderConfig?.provider || 'builtin';
   const userApiKey = typeof aiProviderConfig?.apiKey === 'string' ? aiProviderConfig.apiKey.trim() : '';
   const userModel = typeof aiProviderConfig?.model === 'string' ? aiProviderConfig.model.trim() : '';
 
-  const finalizeText = (raw: string) =>
-    type === 'transcritor-exames' ? postProcessTranscritorOutput(raw, outputFormat) : raw;
-
-  // 1. Direct Client Execution when key is available for external non-Gemini providers
+  // 1. Direct browser execution when user supplies a personal key (avoids 10s serverless timeout on Netlify)
   if (provider === 'chatgpt' && userApiKey) {
-    const text = await generateWithChatGptClient(
-      userApiKey,
-      userModel,
-      promptText,
-      sanitizedImages,
-      isJsonResponse
-    );
-    return { text: finalizeText(text), provider: 'chatgpt' };
+    const text = await generateWithChatGpt(userApiKey, userModel, promptText, sanitizedImages, isJsonResponse);
+    return { text: finalizeAiOutput(type, text, outputFormat), provider: 'chatgpt' };
   }
 
   if (provider === 'claude' && userApiKey) {
-    const text = await generateWithClaudeClient(
+    const text = await generateWithClaude(
       userApiKey,
       userModel,
       promptText,
       sanitizedImages,
-      isJsonResponse
+      isJsonResponse,
+      true
     );
-    return { text: finalizeText(text), provider: 'claude' };
+    return { text: finalizeAiOutput(type, text, outputFormat), provider: 'claude' };
   }
 
-  // 2. Server-side execution for Gemini and Builtin AI via /api/generate-evolucao
+  if (provider === 'gemini' && userApiKey) {
+    try {
+      const text = await generateWithGeminiClient(
+        userApiKey,
+        promptText,
+        sanitizedImages,
+        isJsonResponse,
+        userModel
+      );
+      return { text: finalizeAiOutput(type, text, outputFormat), provider: 'gemini' };
+    } catch (directErr: any) {
+      const msg = String(directErr?.message || '');
+      if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        throw directErr;
+      }
+      console.warn('[AI Client] Direct Gemini call failed, trying backend fallback:', msg);
+    }
+  }
+
+  // 2. Builtin provider with shared class key saved in Firestore/localStorage
   const sharedKey = getBuiltinGeminiApiKey();
+  if (provider === 'builtin' && sharedKey) {
+    try {
+      const text = await generateWithGeminiClient(
+        sharedKey,
+        promptText,
+        sanitizedImages,
+        isJsonResponse,
+        userModel
+      );
+      return { text: finalizeAiOutput(type, text, outputFormat), provider: 'builtin' };
+    } catch (directErr: any) {
+      console.warn('[AI Client] Builtin direct Gemini call failed, trying backend fallback:', directErr?.message);
+    }
+  }
+
+  // 3. Backend fallback (/api/generate-evolucao for AI Studio server env key or restricted corporate networks)
   const effectivePayload: ExecuteAiPayload = {
     ...payload,
     aiProviderConfig: {
@@ -540,5 +347,8 @@ export async function executeAiGeneration(
     );
   }
 
-  return { text: finalizeText(parsedBody.text), provider: parsedBody.provider || provider };
+  return {
+    text: finalizeAiOutput(type, parsedBody.text, outputFormat),
+    provider: parsedBody.provider || provider,
+  };
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button, Textarea } from '@/components/ui';
 import { Paperclip, Send, Copy, FileText, AlertCircle, RefreshCw, Save, Trash2, Wand2, X } from 'lucide-react';
 import { cn, copyToClipboard } from '@/lib/utils';
@@ -15,15 +15,30 @@ interface SavedFormat { id: string; label: string; format: string }
 const BATCH_SIZE = 8;
 
 export default function TranscritorExames() {
-  const [isSync, setIsSync] = useState(true);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [isSync, setIsSync] = useLocalStorage<boolean>('transcritor_sync_enabled', true);
+  const [syncedMessages, setSyncedMessages] = useLocalStorage<Message[]>('transcritor_mensagens_atuais', []);
+  const [syncedOutputFormat, setSyncedOutputFormat] = useLocalStorage<string>('transcritor_formato_atual', '');
+  const [localMessages, setLocalMessages] = useState<Message[]>(() => syncedMessages);
+  const [localOutputFormat, setLocalOutputFormat] = useState<string>(() => syncedOutputFormat);
+
+  const messages = isSync ? syncedMessages : localMessages;
+  const setMessages = isSync ? setSyncedMessages : setLocalMessages;
+  const outputFormat = isSync ? syncedOutputFormat : localOutputFormat;
+  const setOutputFormat = isSync ? setSyncedOutputFormat : setLocalOutputFormat;
+
   const [input, setInput] = useState('');
-  const [outputFormat, setOutputFormat] = useState('');
   const [mobileTab, setMobileTab] = useState<'chat' | 'options'>('chat');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [savedSessions, setSavedSessions] = useLocalStorage<SavedSession[]>('transcricoes_salvas', []);
   const [savedFormats, setSavedFormats] = useLocalStorage<SavedFormat[]>('transcritor_formatos_salvos', []);
+
+  useEffect(() => {
+    if (isSync) {
+      setLocalMessages(syncedMessages);
+      setLocalOutputFormat(syncedOutputFormat);
+    }
+  }, [isSync, syncedMessages, syncedOutputFormat]);
 
   const { generate, loading: isLoading } = useAiGenerate();
   const { toast } = useToast();

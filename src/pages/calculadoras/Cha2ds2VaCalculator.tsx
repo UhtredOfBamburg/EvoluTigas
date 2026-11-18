@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { RotateCcw, Copy, Check } from 'lucide-react';
+import { copyToClipboard } from '@/lib/utils';
 
 export function Cha2ds2VaCalculator() {
   const [ic, setIc] = useState<boolean | null>(null);
@@ -74,9 +75,9 @@ export function Cha2ds2VaCalculator() {
     };
   }, [ic, has, idade, dm, avc, doencaVascular]);
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     const text = `CHA2DS2-VA: ${calculation.total} ${calculation.total === 1 ? 'ponto' : 'pontos'} (${calculation.nivelRisco}) — ${calculation.conduta}`;
-    navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label, Button } from '@/components/ui';
 import { Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
+import { copyToClipboard } from '@/lib/utils';
 
 export function EletrolitosGasometriaCalculator() {
   const { toast } = useToast();
@@ -78,8 +79,8 @@ export function EletrolitosGasometriaCalculator() {
     };
   }, [agNa, agCl, agHco3, agAlb]);
 
-  const copyText = (key: string, text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyText = async (key: string, text: string) => {
+    await copyToClipboard(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 1800);
     toast('Copiado para a área de transferência!', 'success');

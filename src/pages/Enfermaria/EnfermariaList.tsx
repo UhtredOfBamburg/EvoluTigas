@@ -21,6 +21,7 @@ import { useEnfermariaPatients, calculateDaysInterned } from '@/hooks/useEnferma
 import { useToast } from '@/hooks/useToast';
 import { readScopedLocalStorage } from '@/hooks/useLocalStorage';
 import { copyToClipboard } from '@/lib/utils';
+import { sanitizeWinAnsi } from '@/lib/generateFilledPdf';
 import { jsPDF } from 'jspdf';
 
 export default function Enfermaria() {
@@ -116,7 +117,7 @@ export default function Enfermaria() {
   };
 
   const handleDownloadPassagemPdf = () => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const dataHoje = new Date().toLocaleString('pt-BR');
     doc.setFontSize(14);
     doc.text('Folha de Passagem de Plantao e Visita - Enfermaria', 105, 16, { align: 'center' });
@@ -124,13 +125,13 @@ export default function Enfermaria() {
     doc.text(`Gerado em: ${dataHoje} | Leitos ocupados: ${internados.length}`, 15, 24);
     doc.line(15, 27, 195, 27);
 
-    const cleanText = passagemTexto.replace(/\*/g, '').replace(/📋|⚠️/g, '');
+    const cleanText = sanitizeWinAnsi(passagemTexto.replace(/\*/g, ''));
     doc.setFontSize(9.5);
     const splitText = doc.splitTextToSize(cleanText, 180);
     let y = 34;
     for (let i = 0; i < splitText.length; i++) {
       if (y > 280) {
-        doc.addPage();
+        doc.addPage('a4', 'portrait');
         y = 18;
       }
       doc.text(splitText[i], 15, y);

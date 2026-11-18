@@ -2,101 +2,26 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { MULTIMODAL_TYPES } from "./server/prompts";
 import {
-  ALL_KNOWN_TYPES,
-  MULTIMODAL_TYPES,
-  buildPrompt,
-  buildTranscritorPrompt,
-  postProcessTranscritorOutput,
-  buildFieldDetectionPrompt,
-  buildAutoFieldDetectionPrompt,
-  buildFormAutoFillPrompt,
-} from "./server/prompts";
-
-const MODEL_CANDIDATES = [
-  "gemini-3.8-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-flash-lite-latest",
-  "gemini-3.1-flash-lite",
-  "gemini-4-argon",
-  "gemini-flash-latest",
-];
-
-const JSON_RESPONSE_TYPES = new Set([
-  "detectar-campos-pdf",
-  "auto-detectar-campos-pdf",
-  "preencher-formulario-ia",
-  "interpretar-condutas",
-]);
-
-function sanitizeInlineData(item: any) {
-  if (!item || typeof item !== "object") return null;
-  let data = typeof item.data === "string" ? item.data : "";
-  let detectedMime = item.mimeType && typeof item.mimeType === "string" ? item.mimeType.trim() : "";
-  if (data.startsWith("data:")) {
-    const match = data.match(/^data:([^;]+);base64,(.+)$/s);
-    if (match) {
-      if (!detectedMime) detectedMime = match[1];
-      data = match[2];
-    }
-  } else if (data.includes(",")) {
-    data = data.split(",")[1];
-  }
-  data = data.replace(/\s+/g, "");
-  if (!data || data.length < 16) return null;
-
-  let mimeType = detectedMime || "image/jpeg";
-  if (mimeType === "image/heic" || mimeType === "image/heif" || mimeType === "application/octet-stream") {
-    mimeType = "image/jpeg";
-  }
-  return { mimeType, data };
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timeout after ${ms}ms on ${label}`));
-    }, ms);
-    promise
-      .then((val) => {
-        clearTimeout(timer);
-        resolve(val);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
+  prepareAiRequestContent,
+  finalizeAiOutput,
+  resolveGeminiCandidateModels,
+  markModelTemporarilyBlocked,
+  markModelHealthy,
+  withTimeout,
+  generateWithChatGpt,
+  generateWithClaude,
+} from "./server/aiShared";
 
 async function generateWithGeminiFallback(
   aiClient: GoogleGenAI,
   contents: any,
   isJsonResponse: boolean,
-  preferredModel?: string,
-  isCustomGeminiKey?: boolean
+  preferredModel?: string
 ) {
   let lastError: any = null;
-  const normalizedPreferred =
-    preferredModel === "gemini-2.5-pro" || preferredModel === "argon"
-      ? "gemini-4-argon"
-      : preferredModel === "gemini-2.5-flash" || preferredModel === "gemini-2.0-flash"
-      ? "gemini-3.8-flash"
-      : preferredModel === "gemini-2.5-flash-lite"
-      ? "gemini-3.1-flash-lite"
-      : preferredModel;
-
-  let candidates: string[];
-  if (normalizedPreferred) {
-    candidates = [
-      normalizedPreferred,
-      ...MODEL_CANDIDATES.filter((m) => m !== normalizedPreferred),
-    ];
-  } else {
-    candidates = [...MODEL_CANDIDATES];
-  }
+  const candidates = resolveGeminiCandidateModels(preferredModel);
 
   for (const modelName of candidates) {
     const baseConfig: Record<string, any> = {
@@ -107,7 +32,7 @@ async function generateWithGeminiFallback(
     }
 
     try {
-      return await withTimeout(
+      const response = await withTimeout(
         aiClient.models.generateContent({
           model: modelName,
           contents,
@@ -116,198 +41,20 @@ async function generateWithGeminiFallback(
         28000,
         modelName
       );
+      markModelHealthy(modelName);
+      return response;
     } catch (err: any) {
       lastError = err;
+      markModelTemporarilyBlocked(modelName);
       const msg = String(err?.message || err || "");
       console.warn(`[AI] Model "${modelName}" failed (${msg.slice(0, 140)}).`);
+      if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid")) {
+        break;
+      }
     }
   }
 
   throw lastError || new Error("Não foi possível gerar resposta com o Gemini.");
-}
-
-async function generateWithChatGpt(
-  apiKey: string,
-  model: string,
-  promptText: string,
-  images: Array<{ mimeType: string; data: string }>,
-  isJsonResponse: boolean
-): Promise<string> {
-  const requestedModel = model || "gpt-5.6-sol";
-  const candidateModels = Array.from(
-    new Set([requestedModel, "gpt-4o", "gpt-4o-mini"])
-  );
-
-  const contentParts: any[] = [];
-  for (const img of images) {
-    contentParts.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.data}`,
-      },
-    });
-  }
-  contentParts.push({
-    type: "text",
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido.`
-      : promptText,
-  });
-
-  let lastErrorMsg = "";
-
-  for (const candidate of candidateModels) {
-    const isReasoningModel = candidate.startsWith("o1") || candidate.startsWith("o3");
-    const body: Record<string, any> = {
-      model: candidate,
-      messages: [
-        {
-          role: "user",
-          content: images.length > 0 ? contentParts : contentParts[0].text,
-        },
-      ],
-      ...(isReasoningModel ? {} : { temperature: isJsonResponse ? 0.1 : 0.25 }),
-    };
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey.trim()}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return data?.choices?.[0]?.message?.content || "";
-    }
-
-    let errText = "";
-    let errCode = "";
-    try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || "";
-      errCode = errJson?.error?.code || "";
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
-
-    const isModelUnavailable =
-      response.status === 404 ||
-      errCode === "model_not_found" ||
-      errText.toLowerCase().includes("model") ||
-      errText.toLowerCase().includes("does not exist");
-
-    if (!isModelUnavailable) {
-      break;
-    }
-  }
-
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no ChatGPT (OpenAI): ${lastErrorMsg}`
-      : "Erro na conexão com ChatGPT. Verifique sua chave nas configurações de IA."
-  );
-}
-
-async function generateWithClaude(
-  apiKey: string,
-  model: string,
-  promptText: string,
-  images: Array<{ mimeType: string; data: string }>,
-  isJsonResponse: boolean
-): Promise<string> {
-  const requestedModel = model || "claude-opus-5-5";
-  const candidateModels = Array.from(
-    new Set([
-      requestedModel,
-      "claude-3-7-sonnet-latest",
-      "claude-3-5-sonnet-latest",
-      "claude-3-5-haiku-latest",
-    ])
-  );
-
-  const contentBlocks: any[] = [];
-  for (const img of images) {
-    const allowedMedia = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    const mediaType = allowedMedia.includes(img.mimeType) ? img.mimeType : "image/jpeg";
-    contentBlocks.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: mediaType,
-        data: img.data,
-      },
-    });
-  }
-
-  contentBlocks.push({
-    type: "text",
-    text: isJsonResponse
-      ? `${promptText}\n\nIMPORTANTE: Retorne EXCLUSIVAMENTE um JSON válido, sem markdown nem texto adicional.`
-      : promptText,
-  });
-
-  let lastErrorMsg = "";
-
-  for (const candidate of candidateModels) {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey.trim(),
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: candidate,
-        max_tokens: 4096,
-        temperature: isJsonResponse ? 0.1 : 0.25,
-        messages: [
-          {
-            role: "user",
-            content: contentBlocks,
-          },
-        ],
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const blocks = Array.isArray(data?.content) ? data.content : [];
-      return blocks
-        .filter((b: any) => b.type === "text" && typeof b.text === "string")
-        .map((b: any) => b.text)
-        .join("\n");
-    }
-
-    let errText = "";
-    let errType = "";
-    try {
-      const errJson = await response.json();
-      errText = errJson?.error?.message || "";
-      errType = errJson?.error?.type || "";
-    } catch {
-      errText = await response.text();
-    }
-    lastErrorMsg = errText;
-
-    const isModelUnavailable =
-      response.status === 404 ||
-      errType === "not_found_error" ||
-      errText.toLowerCase().includes("model");
-
-    if (!isModelUnavailable) {
-      break;
-    }
-  }
-
-  throw new Error(
-    lastErrorMsg
-      ? `Erro no Claude (Anthropic): ${lastErrorMsg}`
-      : "Erro na conexão com o Claude. Verifique sua chave nas configurações de IA."
-  );
 }
 
 async function startServer() {
@@ -355,6 +102,7 @@ async function startServer() {
           model || "claude-opus-5-5",
           "Responda apenas com a palavra: CONECTADO",
           [],
+          false,
           false
         );
         return res.json({ ok: true, provider: "claude", sample: reply.trim().slice(0, 60) });
@@ -373,8 +121,7 @@ async function startServer() {
           customGemini,
           "Responda apenas com a palavra: CONECTADO",
           false,
-          model || "gemini-4-argon",
-          true
+          model || "gemini-4-argon"
         );
         const text = response.text || "CONECTADO";
         return res.json({ ok: true, provider: "gemini", sample: text.trim().slice(0, 60) });
@@ -398,15 +145,15 @@ async function startServer() {
       customPrompt,
       outputFormat,
       fieldLabels,
-      alreadyFound,
       formFields,
       aiProviderConfig,
     } = req.body ?? {};
 
-    if (typeof type !== "string" || !ALL_KNOWN_TYPES.includes(type)) {
-      return res.status(400).json({
-        error: `Invalid or missing "type". Expected one of: ${ALL_KNOWN_TYPES.join(", ")}.`,
-      });
+    let prepared;
+    try {
+      prepared = prepareAiRequestContent(req.body ?? {});
+    } catch (err: any) {
+      return res.status(400).json({ error: err?.message || "Invalid request payload." });
     }
 
     const isMultimodal = (MULTIMODAL_TYPES as readonly string[]).includes(type);
@@ -423,42 +170,10 @@ async function startServer() {
       return res.status(400).json({ error: `"formFields" (non-empty array) is required for type "preencher-formulario-ia".` });
     }
 
-    const isJsonResponse = JSON_RESPONSE_TYPES.has(type);
-
-    let promptText = "";
-    const sanitizedImages: Array<{ mimeType: string; data: string }> = [];
-
-    if (isMultimodal) {
-      if (type === "detectar-campos-pdf") {
-        promptText = buildFieldDetectionPrompt(fieldLabels, Array.isArray(alreadyFound) ? alreadyFound : []);
-      } else if (type === "auto-detectar-campos-pdf") {
-        promptText = buildAutoFieldDetectionPrompt();
-      } else if (type === "preencher-formulario-ia") {
-        promptText = buildFormAutoFillPrompt(formFields, customPrompt);
-      } else {
-        promptText = buildTranscritorPrompt(customPrompt, outputFormat);
-      }
-
-      if (inlineData) {
-        const sanitized = sanitizeInlineData(inlineData);
-        if (sanitized) sanitizedImages.push(sanitized);
-      }
-      if (Array.isArray(inlineDatas)) {
-        inlineDatas.forEach((data) => {
-          const sanitized = sanitizeInlineData(data);
-          if (sanitized) sanitizedImages.push(sanitized);
-        });
-      }
-    } else {
-      promptText = buildPrompt(type, formData);
-    }
-
+    const { promptText, sanitizedImages, isJsonResponse } = prepared;
     const provider = aiProviderConfig?.provider || "builtin";
     const userApiKey = typeof aiProviderConfig?.apiKey === "string" ? aiProviderConfig.apiKey.trim() : "";
     const userModel = typeof aiProviderConfig?.model === "string" ? aiProviderConfig.model.trim() : "";
-
-    const finalizeText = (raw: string) =>
-      type === "transcritor-exames" ? postProcessTranscritorOutput(raw, outputFormat) : raw;
 
     try {
       if (provider === "chatgpt" && userApiKey) {
@@ -469,7 +184,7 @@ async function startServer() {
           sanitizedImages,
           isJsonResponse
         );
-        return res.json({ text: finalizeText(resultText), provider: "chatgpt" });
+        return res.json({ text: finalizeAiOutput(type, resultText, outputFormat), provider: "chatgpt" });
       }
 
       if (provider === "claude" && userApiKey) {
@@ -478,9 +193,10 @@ async function startServer() {
           userModel || "claude-opus-5-5",
           promptText,
           sanitizedImages,
-          isJsonResponse
+          isJsonResponse,
+          false
         );
-        return res.json({ text: finalizeText(resultText), provider: "claude" });
+        return res.json({ text: finalizeAiOutput(type, resultText, outputFormat), provider: "claude" });
       }
 
       const isCustomGemini = Boolean(provider === "gemini" && userApiKey);
@@ -528,8 +244,7 @@ async function startServer() {
         activeGeminiClient,
         geminiContents,
         isJsonResponse,
-        userModel || undefined,
-        isCustomGemini
+        userModel || undefined
       );
 
       const resultText =
@@ -539,7 +254,10 @@ async function startServer() {
           .filter(Boolean)
           .join("\n") ||
         "";
-      return res.json({ text: finalizeText(resultText), provider: provider === "gemini" ? "gemini" : "builtin" });
+      return res.json({
+        text: finalizeAiOutput(type, resultText, outputFormat),
+        provider: provider === "gemini" ? "gemini" : "builtin",
+      });
     } catch (error: any) {
       console.error(`Error generating text for type "${type}" with provider "${provider}":`, error);
       const status = error?.status && Number.isInteger(error.status) ? error.status : 500;

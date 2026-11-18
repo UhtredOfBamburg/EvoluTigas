@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label, Button } from '@/components/ui';
 import { Copy, Check, Syringe } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
+import { copyToClipboard } from '@/lib/utils';
 
 interface DrugConfig {
   id: string;
@@ -168,9 +169,9 @@ export function GuiaDvaSedacaoCalculator() {
 
   const visibleDrugs = DRUGS.filter((d) => (filterCat === 'todas' ? true : d.category === filterCat));
 
-  const handleCopyPrescription = (drug: DrugConfig, mlHStr: string, doseVal: number) => {
+  const handleCopyPrescription = async (drug: DrugConfig, mlHStr: string, doseVal: number) => {
     const text = `${drug.name}: ${drug.dilutionRecipe} — Correr em BIC a ${mlHStr} mL/h (${doseVal.toFixed(2)} ${drug.unitLabel} para ${weightKg} kg).`;
-    navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     setCopiedId(drug.id);
     setTimeout(() => setCopiedId(null), 1800);
     toast('Diluição e dose copiadas para a prescrição/evolução!', 'success');

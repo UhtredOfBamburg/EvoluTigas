@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/useToast';
 import { useLocalStorage, readScopedLocalStorage, writeScopedLocalStorage } from '@/hooks/useLocalStorage';
 import { useEnfermariaPatients, calculateDaysInterned } from '@/hooks/useEnfermariaPatients';
 import { copyToClipboard } from '@/lib/utils';
+import { sanitizeWinAnsi } from '@/lib/generateFilledPdf';
 import { GoogleDocsConnector } from '@/components/GoogleDocsConnector';
 import type { GoogleDocExtracted } from '@/lib/googleDocs';
 import {
@@ -166,19 +167,19 @@ export default function PatientDetails() {
   };
 
   const exportDocumentPdf = (title: string, content: string, filenamePrefix: string) => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     doc.setFontSize(15);
-    doc.text(title, 105, 18, { align: 'center' });
+    doc.text(sanitizeWinAnsi(title), 105, 18, { align: 'center' });
     doc.setFontSize(10);
-    doc.text(`Paciente: ${patientName} | Leito: ${patientBed}`, 20, 30);
-    doc.text(`HD: ${patientDiagnosis} | Data: ${new Date().toLocaleString('pt-BR')}`, 20, 36);
+    doc.text(sanitizeWinAnsi(`Paciente: ${patientName} | Leito: ${patientBed}`), 20, 30);
+    doc.text(sanitizeWinAnsi(`HD: ${patientDiagnosis} | Data: ${new Date().toLocaleString('pt-BR')}`), 20, 36);
     doc.line(20, 40, 190, 40);
     doc.setFontSize(10.5);
-    const splitText = doc.splitTextToSize(content, 170);
+    const splitText = doc.splitTextToSize(sanitizeWinAnsi(content), 170);
     let y = 48;
     for (let i = 0; i < splitText.length; i++) {
       if (y > 275) {
-        doc.addPage();
+        doc.addPage('a4', 'portrait');
         y = 20;
       }
       doc.text(splitText[i], 20, y);

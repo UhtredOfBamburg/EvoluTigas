@@ -13,7 +13,20 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { openPdfDocumentBytes, getSafeCanvasScale, isIOSDevice } from '@/lib/pdfRender';
-import { shareOrDownloadPdfBytes } from '@/lib/generateFilledPdf';
+import {
+  shareOrDownloadPdfBytes,
+  generateHospitalCompatiblePdf,
+  downloadPdfBytes,
+} from '@/lib/generateFilledPdf';
+
+function escapeHtml(text: string): string {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 interface PdfLiveViewerProps {
   pdfBytes: Uint8Array | null;
@@ -69,6 +82,7 @@ export function PdfLiveViewer({
   const [pages, setPages] = useState<PageImage[]>([]);
   const [isRendering, setIsRendering] = useState(false);
   const [isPreparingPrint, setIsPreparingPrint] = useState(false);
+  const [isGeneratingHospitalPdf, setIsGeneratingHospitalPdf] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(100);
   const [rotation, setRotation] = useState<number>(0);
@@ -211,6 +225,8 @@ export function PdfLiveViewer({
       iframe.style.zIndex = '-1';
       document.body.appendChild(iframe);
 
+      const pageWmm = isLandscape ? '297mm' : '210mm';
+      const pageHmm = isLandscape ? '209.5mm' : '296.5mm';
       const imgsHtml = pages
         .map(
           (p) =>
@@ -227,7 +243,7 @@ export function PdfLiveViewer({
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>${title}</title>
+    <title>${escapeHtml(title)}</title>
     <style>
       @page {
         size: ${isLandscape ? 'A4 landscape' : 'A4 portrait'};
@@ -245,8 +261,12 @@ export function PdfLiveViewer({
         background: #ffffff !important;
       }
       .print-page {
-        display: block;
-        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: ${pageWmm};
+        height: ${pageHmm};
+        overflow: hidden;
         margin: 0;
         padding: 0;
         page-break-after: always;
@@ -261,8 +281,7 @@ export function PdfLiveViewer({
       .print-page img {
         display: block;
         width: 100%;
-        height: auto;
-        max-height: 99vh;
+        height: 100%;
         object-fit: contain;
         margin: 0 auto;
       }
@@ -279,6 +298,18 @@ export function PdfLiveViewer({
         await new Promise<void>((r) =>
           requestAnimationFrame(() => requestAnimationFrame(() => r()))
         );
+
+        const cleanupIframe = () => {
+          setTimeout(() => {
+            if (iframe.parentNode) iframe.remove();
+          }, 1500);
+        };
+        try {
+          iframe.contentWindow.addEventListener('afterprint', cleanupIframe, { once: true });
+        } catch {
+          // ignore
+        }
+        setTimeout(cleanupIframe, 120000);
 
         setIsPreparingPrint(false);
         iframe.contentWindow.focus();
@@ -322,6 +353,21 @@ export function PdfLiveViewer({
   const handleNativeShare = async () => {
     if (!pdfBytes) return;
     await shareOrDownloadPdfBytes(pdfBytes, title);
+  };
+
+  const handleDownloadHospitalPdf = async () => {
+    if (!pdfBytes || isGeneratingHospitalPdf) return;
+    setIsGeneratingHospitalPdf(true);
+    try {
+      const compatBytes = await generateHospitalCompatiblePdf(pdfBytes);
+      const baseName = title.replace(/\.pdf$/i, '');
+      downloadPdfBytes(compatBytes, `${baseName}_impressora_hospital.pdf`);
+    } catch (err) {
+      console.error('Error generating hospital-compatible PDF:', err);
+      onDownload?.();
+    } finally {
+      setIsGeneratingHospitalPdf(false);
+    }
   };
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -427,6 +473,15 @@ export function PdfLiveViewer({
             title="Abrir PDF em nova guia"
           >
             <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadHospitalPdf}
+            disabled={!pdfBytes || isGeneratingHospitalPdf}
+            className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] font-medium text-teal-200 transition-colors disabled:opacity-50"
+            title="Baixar PDF Achatado (Modo Universal para impressoras antigas de hospital)"
+          >
+            {isGeneratingHospitalPdf ? 'Gerando...' : 'PDF Hospitalar'}
           </button>
           <button
             type="button"

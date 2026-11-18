@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { RotateCcw, Copy, Check } from 'lucide-react';
+import { copyToClipboard } from '@/lib/utils';
 
 type AsciteOption = 'Ausente' | 'Leve' | 'Moderada';
 type EncefalopatiaOption = 'Ausente' | 'Grau 1-2' | 'Grau 3-4';
@@ -107,10 +108,10 @@ export function ChildPughCalculator() {
     };
   }, [bilirrubina, albumina, inr, ascite, encefalopatia]);
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!calculation.isComplete) return;
     const text = `Child-Pugh: ${calculation.total} pontos (Classe ${calculation.classe} - ${calculation.descricao}) | Bilirrubina: ${bilirrubina} mg/dL (${calculation.biliPts} pt), Albumina: ${albumina} g/dL (${calculation.albPts} pt), INR: ${inr} (${calculation.inrPts} pt), Ascite: ${ascite} (${calculation.ascitePts} pt), Encefalopatia: ${encefalopatia} (${calculation.encefPts} pt).`;
-    navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
