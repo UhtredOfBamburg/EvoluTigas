@@ -1,13 +1,56 @@
 @import "tailwindcss";
 
-/* Modo Plantão Noturno (Conforto Visual Hospitalar) */
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbar discreta e limpa */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.55);
+}
+
+/* Modo Plantão Noturno (Conforto Visual Hospitalar Completo) */
 html.night-shift {
   color-scheme: dark;
+  --night-bg: #090f1d;
+  --night-surface: #0f172a;
+  --night-surface-subtle: #131e33;
+  --night-surface-hover: #1b2842;
+  --night-border: #1e293b;
 }
 
 html.night-shift body,
 html.night-shift .bg-slate-50 {
-  background-color: #0b1120 !important;
+  background-color: var(--night-bg) !important;
   color: #e2e8f0 !important;
 }
 
@@ -16,14 +59,23 @@ html.night-shift .bg-slate-50\/60,
 html.night-shift .bg-slate-50\/70,
 html.night-shift .bg-slate-50\/80,
 html.night-shift .bg-slate-100,
+html.night-shift .bg-slate-100\/70,
 html.night-shift .bg-slate-100\/80 {
-  background-color: #111827 !important;
+  background-color: var(--night-surface-subtle) !important;
   color: #cbd5e1 !important;
 }
 
-html.night-shift .bg-white {
-  background-color: #0f172a !important;
+html.night-shift .bg-white,
+html.night-shift .bg-white\/80,
+html.night-shift .bg-white\/90,
+html.night-shift .bg-white\/95 {
+  background-color: var(--night-surface) !important;
   color: #f1f5f9 !important;
+}
+
+/* Gradientes claros que estouravam brilho no modo noturno */
+html.night-shift [class*="bg-gradient-to-"] {
+  background-image: linear-gradient(135deg, #111c30 0%, #0f172a 100%) !important;
 }
 
 html.night-shift .border-slate-100,
@@ -32,14 +84,15 @@ html.night-shift .border-slate-200\/70,
 html.night-shift .border-slate-200\/80,
 html.night-shift .border-slate-200\/90,
 html.night-shift .border-slate-300 {
-  border-color: #1e293b !important;
+  border-color: var(--night-border) !important;
 }
 
 html.night-shift .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 html.night-shift .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #1e293b !important;
+  border-color: var(--night-border) !important;
 }
 
+html.night-shift .text-slate-950,
 html.night-shift .text-slate-900,
 html.night-shift .text-slate-800 {
   color: #f1f5f9 !important;
@@ -55,6 +108,7 @@ html.night-shift .text-slate-400 {
   color: #94a3b8 !important;
 }
 
+/* Superfícies coloridas suaves (teal, blue, indigo, emerald, purple, amber, red, rose, orange, cyan) */
 html.night-shift .bg-teal-50,
 html.night-shift .bg-teal-50\/50,
 html.night-shift .bg-teal-50\/60,
@@ -63,13 +117,12 @@ html.night-shift .bg-teal-100 {
   background-color: rgba(13, 148, 136, 0.16) !important;
   color: #5eead4 !important;
 }
-
+html.night-shift .text-teal-950,
 html.night-shift .text-teal-900,
 html.night-shift .text-teal-800,
 html.night-shift .text-teal-700 {
   color: #5eead4 !important;
 }
-
 html.night-shift .border-teal-100,
 html.night-shift .border-teal-200,
 html.night-shift .border-teal-300,
@@ -77,26 +130,107 @@ html.night-shift .border-teal-300\/80 {
   border-color: rgba(45, 212, 191, 0.28) !important;
 }
 
+html.night-shift .bg-blue-50,
+html.night-shift .bg-blue-50\/50,
+html.night-shift .bg-blue-50\/70,
+html.night-shift .bg-blue-100,
+html.night-shift .bg-sky-50,
+html.night-shift .bg-cyan-50 {
+  background-color: rgba(37, 99, 235, 0.16) !important;
+  color: #93c5fd !important;
+}
+html.night-shift .text-blue-950,
+html.night-shift .text-blue-900,
+html.night-shift .text-blue-800,
+html.night-shift .text-blue-700 {
+  color: #93c5fd !important;
+}
+html.night-shift .border-blue-100,
+html.night-shift .border-blue-200,
+html.night-shift .border-blue-300 {
+  border-color: rgba(96, 165, 250, 0.28) !important;
+}
+
+html.night-shift .bg-indigo-50,
+html.night-shift .bg-indigo-50\/50,
+html.night-shift .bg-indigo-50\/70,
+html.night-shift .bg-indigo-100,
+html.night-shift .bg-purple-50,
+html.night-shift .bg-purple-100 {
+  background-color: rgba(99, 102, 241, 0.16) !important;
+  color: #c7d2fe !important;
+}
+html.night-shift .text-indigo-950,
+html.night-shift .text-indigo-900,
+html.night-shift .text-indigo-800,
+html.night-shift .text-indigo-700,
+html.night-shift .text-purple-900,
+html.night-shift .text-purple-800,
+html.night-shift .text-purple-700 {
+  color: #c7d2fe !important;
+}
+html.night-shift .border-indigo-100,
+html.night-shift .border-indigo-200,
+html.night-shift .border-purple-200 {
+  border-color: rgba(129, 140, 248, 0.28) !important;
+}
+
+html.night-shift .bg-emerald-50,
+html.night-shift .bg-emerald-50\/70,
+html.night-shift .bg-emerald-100,
+html.night-shift .bg-green-50,
+html.night-shift .bg-green-100 {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+  color: #6ee7b7 !important;
+}
+html.night-shift .text-emerald-900,
+html.night-shift .text-emerald-800,
+html.night-shift .text-emerald-700,
+html.night-shift .text-green-800,
+html.night-shift .text-green-700 {
+  color: #6ee7b7 !important;
+}
+html.night-shift .border-emerald-200,
+html.night-shift .border-green-200 {
+  border-color: rgba(52, 211, 153, 0.28) !important;
+}
+
 html.night-shift .bg-amber-50,
 html.night-shift .bg-amber-50\/70,
-html.night-shift .bg-amber-50\/80 {
-  background-color: rgba(217, 119, 6, 0.15) !important;
-}
-
-html.night-shift .text-amber-900,
-html.night-shift .text-amber-800,
-html.night-shift .text-amber-700 {
+html.night-shift .bg-amber-50\/80,
+html.night-shift .bg-amber-100,
+html.night-shift .bg-orange-50 {
+  background-color: rgba(217, 119, 6, 0.18) !important;
   color: #fcd34d !important;
 }
-
-html.night-shift .bg-red-50 {
-  background-color: rgba(220, 38, 38, 0.15) !important;
+html.night-shift .text-amber-900,
+html.night-shift .text-amber-800,
+html.night-shift .text-amber-700,
+html.night-shift .text-orange-800 {
+  color: #fcd34d !important;
+}
+html.night-shift .border-amber-200,
+html.night-shift .border-amber-300 {
+  border-color: rgba(251, 191, 36, 0.3) !important;
 }
 
+html.night-shift .bg-red-50,
+html.night-shift .bg-red-100,
+html.night-shift .bg-rose-50,
+html.night-shift .bg-rose-100 {
+  background-color: rgba(220, 38, 38, 0.16) !important;
+  color: #fca5a5 !important;
+}
 html.night-shift .text-red-900,
 html.night-shift .text-red-800,
-html.night-shift .text-red-700 {
+html.night-shift .text-red-700,
+html.night-shift .text-rose-800,
+html.night-shift .text-rose-700 {
   color: #fca5a5 !important;
+}
+html.night-shift .border-red-200,
+html.night-shift .border-rose-200 {
+  border-color: rgba(248, 113, 113, 0.3) !important;
 }
 
 html.night-shift input:not([type="checkbox"]):not([type="radio"]),
@@ -114,8 +248,11 @@ html.night-shift textarea::placeholder {
 
 html.night-shift .hover\:bg-slate-50:hover,
 html.night-shift .hover\:bg-slate-50\/70:hover,
-html.night-shift .hover\:bg-slate-100:hover {
-  background-color: #172236 !important;
+html.night-shift .hover\:bg-slate-100:hover,
+html.night-shift .hover\:bg-teal-50:hover,
+html.night-shift .hover\:bg-blue-50:hover,
+html.night-shift .hover\:bg-indigo-50:hover {
+  background-color: var(--night-surface-hover) !important;
 }
 
 /* Modo Compacto para Fichas Clínicas (Enfermaria e Ambulatório) */

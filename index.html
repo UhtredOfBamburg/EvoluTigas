@@ -2,59 +2,21 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <script>
       (function() {
-        function syncSharedInternals(internals) {
-          if (internals && internals.currentDispatcherRef) {
-            var ref = internals.currentDispatcherRef;
-            window.__REACT_ACTIVE_SHARED_INTERNALS__ = ref;
-            var _h = ref.H;
-            try {
-              Object.defineProperty(ref, 'H', {
-                configurable: true,
-                enumerable: true,
-                get: function() { return _h; },
-                set: function(v) {
-                  _h = v;
-                  if (window.__REACT_SHARED_INTERNALS_SINGLETON__ && window.__REACT_SHARED_INTERNALS_SINGLETON__ !== ref) {
-                    window.__REACT_SHARED_INTERNALS_SINGLETON__.H = v;
-                  }
-                }
-              });
-            } catch (_) {}
-          }
-        }
-        if (!window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-          var _renderers = new Map();
-          var _id = 0;
-          window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-            supportsFiber: true,
-            renderers: _renderers,
-            inject: function(internals) {
-              syncSharedInternals(internals);
-              var id = ++_id;
-              _renderers.set(id, internals);
-              return id;
-            },
-            onCommitFiberRoot: function() {},
-            onCommitFiberUnmount: function() {},
-            onPostCommitFiberRoot: function() {},
-            checkDCE: function() {}
-          };
-        } else if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject === 'function') {
-          var _origInject = window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject;
-          window.__REACT_DEVTOOLS_GLOBAL_HOOK__.inject = function(internals) {
-            syncSharedInternals(internals);
-            return _origInject.apply(this, arguments);
-          };
-        }
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.getRegistrations().then(function(regs) {
             for (var i = 0; i < regs.length; i++) {
               var reg = regs[i];
               var scriptURL = (reg.active && reg.active.scriptURL) || (reg.installing && reg.installing.scriptURL) || '';
-              if (scriptURL.indexOf('dev-sw.js') !== -1 || window.location.hostname.indexOf('ais-dev-') === 0) {
+              if (scriptURL.indexOf('dev-sw.js') !== -1) {
                 reg.unregister();
               } else {
                 reg.update();

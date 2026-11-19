@@ -7,15 +7,15 @@ const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HT
       <button
         ref={ref}
         className={cn(
-          "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500 disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex items-center justify-center rounded-lg text-sm font-medium transition-all active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40 focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50",
           {
-            'bg-teal-600 text-white shadow hover:bg-teal-700': variant === 'default',
-            'border border-slate-200 bg-transparent shadow-sm hover:bg-slate-100 hover:text-slate-900': variant === 'outline',
+            'bg-teal-600 text-white shadow-xs hover:bg-teal-700': variant === 'default',
+            'border border-slate-200/90 bg-white text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300': variant === 'outline',
             'hover:bg-slate-100 hover:text-slate-900': variant === 'ghost',
-            'bg-red-500 text-slate-50 shadow-sm hover:bg-red-500/90': variant === 'destructive',
+            'bg-red-600 text-white shadow-xs hover:bg-red-700': variant === 'destructive',
             'h-9 px-4 py-2': size === 'default',
-            'h-8 rounded-md px-3 text-xs': size === 'sm',
-            'h-10 rounded-md px-8': size === 'lg',
+            'h-8 rounded-lg px-3 text-xs': size === 'sm',
+            'h-10 rounded-lg px-6': size === 'lg',
             'h-9 w-9': size === 'icon',
           },
           className
@@ -33,7 +33,7 @@ const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
       <input
         type={type}
         className={cn(
-          "flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-9 w-full rounded-lg border border-slate-200/90 bg-white px-3 py-1 text-sm shadow-2xs transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-slate-400 focus-visible:outline-none focus-visible:border-teal-500 focus-visible:ring-2 focus-visible:ring-teal-500/20 disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         ref={ref}
@@ -49,7 +49,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttribu
     return (
       <textarea
         className={cn(
-          "flex min-h-[60px] w-full rounded-md border border-slate-200 bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex min-h-[60px] w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm shadow-2xs transition-colors placeholder:text-slate-400 focus-visible:outline-none focus-visible:border-teal-500 focus-visible:ring-2 focus-visible:ring-teal-500/20 disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         ref={ref}
@@ -62,7 +62,7 @@ Textarea.displayName = "Textarea"
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("rounded-lg border border-slate-200 bg-white text-slate-950 shadow", className)} {...props} />
+    <div ref={ref} className={cn("rounded-xl border border-slate-200/80 bg-white text-slate-950 shadow-xs", className)} {...props} />
   )
 )
 Card.displayName = "Card"

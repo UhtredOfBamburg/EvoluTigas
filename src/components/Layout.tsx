@@ -10,7 +10,6 @@ import {
   Activity,
   ScanText,
   X,
-  User,
   LogOut,
   Share2,
   Sparkles,
@@ -66,21 +65,23 @@ export default function Layout() {
       : `${getProviderLabel(activeProvider)} Ativo`;
 
   const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Menu Inicial' },
-    { to: '/enfermaria', icon: Activity, label: 'Enfermaria' },
-    { to: '/ambulatorio', icon: Stethoscope, label: 'Ambulatório' },
-    { to: '/formularios', icon: FileText, label: 'Central de Formulários' },
-    { to: '/transcritor', icon: ScanText, label: 'Transcritor de Exames' },
-    { to: '/calculadoras', icon: Calculator, label: 'Calculadoras & DVA' },
-    { to: '/ai-tools', icon: Bot, label: 'Ferramentas AI' },
+    { to: '/', icon: LayoutDashboard, label: 'Menu Inicial', mobileLabel: 'Início', inBottomBar: true },
+    { to: '/enfermaria', icon: Activity, label: 'Enfermaria', mobileLabel: 'Enfermaria', inBottomBar: true },
+    { to: '/ambulatorio', icon: Stethoscope, label: 'Ambulatório', mobileLabel: 'Ambulatório', inBottomBar: true },
+    { to: '/transcritor', icon: ScanText, label: 'Transcritor de Exames', mobileLabel: 'Exames', inBottomBar: true },
+    { to: '/calculadoras', icon: Calculator, label: 'Calculadoras & DVA', mobileLabel: 'Calcs', inBottomBar: true },
+    { to: '/formularios', icon: FileText, label: 'Central de Formulários', mobileLabel: 'Docs', inBottomBar: false },
+    { to: '/ai-tools', icon: Bot, label: 'Estúdio de Redação IA', mobileLabel: 'IA', inBottomBar: false },
   ];
+
+  const mobileTabs = navItems.filter((item) => item.inBottomBar);
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans overflow-hidden">
       {/* Mobile Backdrop */}
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 bg-slate-900/50 z-40 md:hidden"
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] z-40 md:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
@@ -88,38 +89,43 @@ export default function Layout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed md:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0',
+          'fixed md:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200/90 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0 print:hidden',
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="h-14 flex items-center justify-between px-5 border-b border-slate-200 shrink-0">
-          <div className="flex items-center gap-2 text-teal-600 font-bold text-lg">
-            <Activity className="w-5 h-5" />
-            <span>EvoluTigas</span>
+        <div className="h-14 flex items-center justify-between px-4 border-b border-slate-200/80 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center shadow-xs shrink-0">
+              <Activity className="w-4 h-4" />
+            </div>
+            <span className="font-bold text-base tracking-tight text-slate-900">EvoluTigas</span>
           </div>
           <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setNightMode((prev) => !prev)}
-              title={nightMode ? 'Ativar Modo Claro' : 'Ativar Modo Plantão Noturno'}
+              title={nightMode ? 'Voltar para Modo Claro' : 'Ativar Modo Plantão Noturno'}
+              aria-label={nightMode ? 'Voltar para Modo Claro' : 'Ativar Modo Plantão Noturno'}
               className="p-1.5 rounded-lg text-slate-500 hover:text-teal-600 hover:bg-slate-100 transition-colors"
             >
               {nightMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
             </button>
             <button
-              className="md:hidden p-1 text-slate-500 hover:text-slate-700"
+              type="button"
+              className="md:hidden p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100"
               onClick={() => setIsSidebarOpen(false)}
+              aria-label="Fechar menu"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Active Classmate Account & Connected AI Status */}
+        {/* Active Classmate Account & Quick Utilities */}
         {currentUser && (
-          <div className="px-3 pt-2.5 pb-2.5 border-b border-slate-100 bg-slate-50/60 space-y-2 shrink-0">
-            <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-white border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center gap-2 min-w-0">
+          <div className="px-3 pt-3 pb-3 border-b border-slate-100 bg-slate-50/60 space-y-2 shrink-0">
+            <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center font-bold text-xs shrink-0">
                   {currentUser.name.slice(0, 2).toUpperCase()}
                 </div>
@@ -132,7 +138,8 @@ export default function Layout() {
                 type="button"
                 onClick={logout}
                 title="Trocar de conta ou sair"
-                className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                aria-label="Trocar de conta ou sair"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
@@ -142,7 +149,7 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => setIsCommandOpen(true)}
-              className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 transition-colors"
+              className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200/90 transition-colors"
               title="Buscar leito, paciente, droga ou calculadora (Ctrl+K)"
             >
               <span className="flex items-center gap-1.5 truncate">
@@ -169,16 +176,17 @@ export default function Layout() {
           </div>
         )}
 
-        <nav className="flex-1 overflow-y-auto py-2.5 px-3 space-y-1 custom-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-1 custom-scrollbar">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-teal-50 text-teal-700'
+                    ? 'bg-teal-50 text-teal-700 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 )
               }
@@ -189,23 +197,7 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-slate-200 space-y-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setNightMode((prev) => !prev)}
-            className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200/70 text-slate-700 transition-colors"
-          >
-            <span className="flex items-center gap-2">
-              {nightMode ? (
-                <Sun className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <Moon className="w-3.5 h-3.5 text-slate-500" />
-              )}
-              <span>{nightMode ? 'Modo Plantão Noturno' : 'Modo Claro (Diurno)'}</span>
-            </span>
-            <span className="text-[10px] font-semibold text-teal-600">Alternar</span>
-          </button>
-
+        <div className="p-3 border-t border-slate-200/80 space-y-2 shrink-0">
           <PWAInstallButton />
           <button
             type="button"
@@ -215,34 +207,27 @@ export default function Layout() {
             <Share2 className="w-3.5 h-3.5" />
             Compartilhar com a Turma
           </button>
-          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>&copy; {new Date().getFullYear()} EvoluTigas</span>
-            {currentUser && (
-              <button
-                type="button"
-                onClick={logout}
-                className="text-slate-500 hover:text-teal-700 font-medium hover:underline"
-              >
-                Trocar conta
-              </button>
-            )}
-          </div>
+          <p className="text-[11px] text-slate-400 text-center pt-0.5">
+            &copy; {new Date().getFullYear()} EvoluTigas
+          </p>
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Mobile Header */}
-        <header className="md:hidden h-13 shrink-0 bg-white border-b border-slate-200 flex items-center px-3 justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-teal-600 font-bold text-base shrink-0">
-            <Activity className="w-5 h-5 shrink-0" />
-            <span>EvoluTigas</span>
+        {/* Clean Mobile Header */}
+        <header className="md:hidden h-13 shrink-0 bg-white/95 backdrop-blur-md border-b border-slate-200/90 flex items-center px-3.5 justify-between gap-2 print:hidden">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center shadow-2xs">
+              <Activity className="w-4 h-4" />
+            </div>
+            <span className="font-bold text-base tracking-tight text-slate-900">EvoluTigas</span>
           </div>
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setIsCommandOpen(true)}
-              className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-md shrink-0"
+              className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg shrink-0"
               aria-label="Buscar leito ou calculadora"
             >
               <Search className="w-4 h-4" />
@@ -250,26 +235,16 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => setNightMode((prev) => !prev)}
-              className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-md shrink-0"
-              aria-label="Alternar modo noturno"
+              className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg shrink-0"
+              aria-label="Alternar modo plantão noturno"
             >
               {nightMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
             </button>
-            <PWAInstallButton compact />
-            {currentUser && (
-              <button
-                type="button"
-                onClick={() => setIsAiModalOpen(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50 text-teal-800 border border-teal-200 text-xs font-medium whitespace-nowrap shrink-0"
-              >
-                <User className="w-3 h-3 text-teal-600 shrink-0" />
-                <span className="max-w-[68px] truncate">{currentUser.name}</span>
-              </button>
-            )}
             <button
-              className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-md shrink-0"
+              type="button"
+              className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg shrink-0"
               onClick={() => setIsSidebarOpen(true)}
-              aria-label="Abrir menu"
+              aria-label="Abrir menu completo"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -277,9 +252,36 @@ export default function Layout() {
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-5 md:p-6">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 pb-24 md:pb-8 custom-scrollbar">
           <Outlet />
         </div>
+
+        {/* Mobile Bottom Tab Bar (One-Handed Shift Navigation) */}
+        <nav
+          aria-label="Navegação rápida mobile"
+          className="md:hidden fixed inset-x-0 bottom-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-1 pt-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom))] print:hidden"
+        >
+          <div className="grid grid-cols-5 gap-0.5 max-w-md mx-auto">
+            {mobileTabs.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/'}
+                className={({ isActive }) =>
+                  cn(
+                    'flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[10px] font-medium transition-colors',
+                    isActive
+                      ? 'text-teal-700 font-semibold bg-teal-50/70'
+                      : 'text-slate-500 hover:text-slate-800'
+                  )
+                }
+              >
+                <item.icon className="w-4 h-4 shrink-0" />
+                <span className="truncate max-w-full px-0.5">{item.mobileLabel}</span>
+              </NavLink>
+            ))}
+          </div>
+        </nav>
       </main>
 
       {/* Offline Banner */}

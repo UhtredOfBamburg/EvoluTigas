@@ -12,8 +12,9 @@ import {
   Calculator,
   Plus,
   Share2,
-  ShieldCheck,
   Sparkles,
+  AlertCircle,
+  Calendar,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEnfermariaPatients, calculateDaysInterned } from '@/hooks/useEnfermariaPatients';
@@ -44,226 +45,300 @@ export default function Dashboard() {
   const ambulatorioAtivos = ambulatorioPacientes.filter((p) => !p.archived);
   const activeProvider = currentUser?.aiConnections?.activeProvider || 'builtin';
 
+  const todayFormatted = new Intl.DateTimeFormat('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  }).format(new Date());
+
   const stats = [
     {
-      label: 'Meus Pacientes (Enfermaria)',
+      label: 'Leitos Ativos',
       value: String(internados.length),
       sub:
         openPendenciasTotal > 0
-          ? `${openPendenciasTotal} pendência(s) aberta(s) no plantão`
-          : `${patients.length} cadastrados na sua conta`,
+          ? `${openPendenciasTotal} pendência(s) em aberto`
+          : `${patients.length} paciente(s) no histórico`,
+      highlight: openPendenciasTotal > 0,
       icon: Users,
-      color: 'text-teal-600',
+      iconBg: 'bg-teal-50 text-teal-700',
       to: '/enfermaria',
     },
     {
-      label: 'Notas de Ambulatório',
+      label: 'Ambulatório',
       value: String(ambulatorioAtivos.length),
-      sub: 'Atendimentos ativos na sua conta',
+      sub: 'Consultas em andamento',
+      highlight: false,
       icon: Stethoscope,
-      color: 'text-blue-600',
+      iconBg: 'bg-blue-50 text-blue-700',
       to: '/ambulatorio',
     },
     {
-      label: 'Moldes & Transcrições',
+      label: 'Moldes & Exames',
       value: String(templates.length + savedTranscriptions.length),
-      sub: `${templates.length} molde(s) próprio(s) · ${savedTranscriptions.length} transcrição(ões)`,
+      sub: `${templates.length} molde(s) · ${savedTranscriptions.length} transcrição(ões)`,
+      highlight: false,
       icon: FileText,
-      color: 'text-indigo-600',
+      iconBg: 'bg-indigo-50 text-indigo-700',
       to: '/formularios',
     },
   ];
 
-  const shortcuts = [
+  const modules = [
     {
-      label: 'Enfermaria & Evolução',
+      label: 'Enfermaria',
       to: '/enfermaria',
-      description: 'Evolução diária, checklist de pendências, Google Docs e passagem de plantão',
+      description: 'Evolução diária, pendências e passagem de plantão',
       icon: Activity,
+      tone: 'bg-teal-50 text-teal-700',
     },
     {
-      label: 'Ambulatório Inteligente',
+      label: 'Ambulatório',
       to: '/ambulatorio',
-      description: 'Pré-consulta, HDA, exame físico, Google Docs, receitas e exames da consulta',
+      description: 'Pré-consulta, HDA, exame físico e prescrição',
       icon: Stethoscope,
+      tone: 'bg-blue-50 text-blue-700',
     },
     {
-      label: 'Calculadoras & Guia DVA',
-      to: '/calculadoras',
-      description: 'CKD-EPI, Cockcroft-Gault, qSOFA, CURB-65, MELD-Na, Na+/Ca2+/AG e diluição de DVA',
-      icon: Calculator,
-    },
-    {
-      label: 'Transcritor & Formulários',
+      label: 'Transcritor de Exames',
       to: '/transcritor',
-      description: 'Extraia exames laboratoriais com (VR: XX) automático e gere receitas/AIH',
+      description: 'Extrai exames com (VR) automático de fotos e PDFs',
       icon: ScanText,
+      tone: 'bg-emerald-50 text-emerald-700',
+    },
+    {
+      label: 'Central de Formulários',
+      to: '/formularios',
+      description: 'Receitas, atestados, AIH e moldes PDF em 2 vias',
+      icon: FileText,
+      tone: 'bg-indigo-50 text-indigo-700',
+    },
+    {
+      label: 'Calculadoras & DVA',
+      to: '/calculadoras',
+      description: 'CKD-EPI, qSOFA, CURB-65, MELD-Na, eletrólitos e DVA',
+      icon: Calculator,
+      tone: 'bg-amber-50 text-amber-700',
+    },
+    {
+      label: 'Estúdio de Redação IA',
+      to: '/ai-tools',
+      description: 'Adaptar rascunhos SOAP, revisar texto e sumário rápido',
+      icon: Bot,
+      tone: 'bg-purple-50 text-purple-700',
     },
   ];
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-              Olá, {currentUser?.name || 'Colega'}!
-            </h1>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200">
-              <ShieldCheck className="w-3.5 h-3.5" /> Espaço 100% Individual
-            </span>
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Header focado no plantão */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-1">
+            <Calendar className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+            <span className="capitalize">{todayFormatted}</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-teal-700 font-semibold">Espaço Individual</span>
           </div>
-          <p className="text-slate-500 mt-1 text-sm">
-            Seus pacientes, evoluções e modelos de preenchimento ficam salvos exclusivamente na sua conta.
-          </p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 truncate">
+            Olá, {currentUser?.name || 'Colega'}
+          </h1>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <Button
             variant="outline"
-            onClick={() => setIsShareModalOpen(true)}
-            className="border-teal-200 text-teal-800 hover:bg-teal-50"
+            size="sm"
+            onClick={() => navigate('/transcritor')}
+            className="h-9 text-xs sm:text-sm"
           >
-            <Share2 className="w-4 h-4 mr-2 text-teal-600" /> Compartilhar com a Turma
+            <ScanText className="w-4 h-4 mr-1.5 text-teal-600" /> Transcrever Exame
           </Button>
-          <Button variant="outline" onClick={() => navigate('/calculadoras')}>
-            <Calculator className="w-4 h-4 mr-2" /> Calculadoras
-          </Button>
-          <Button onClick={() => navigate('/enfermaria/novo')} className="bg-teal-600 hover:bg-teal-700 text-white">
-            <Plus className="w-4 h-4 mr-2" /> Admitir Paciente
+          <Button
+            size="sm"
+            onClick={() => navigate('/enfermaria/novo')}
+            className="h-9 text-xs sm:text-sm bg-teal-600 hover:bg-teal-700 text-white"
+          >
+            <Plus className="w-4 h-4 mr-1.5" /> Admitir Paciente
           </Button>
         </div>
       </div>
 
-      {/* Live Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Live Shift Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         {stats.map((stat, i) => (
           <Card
             key={i}
-            className="hover:border-teal-200 transition-colors cursor-pointer"
+            className="hover:border-teal-300/80 transition-colors cursor-pointer"
             onClick={() => navigate(stat.to)}
           >
-            <CardContent className="p-5 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">{stat.label}</p>
-                <p className="text-3xl font-bold text-slate-900">{stat.value}</p>
-                <p className="text-xs text-slate-400 mt-1">{stat.sub}</p>
+            <CardContent className="p-4 flex flex-col justify-between gap-2 h-full">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider leading-tight">
+                  {stat.label}
+                </p>
+                <div className={`p-2 rounded-lg shrink-0 ${stat.iconBg}`}>
+                  <stat.icon className="w-4 h-4" />
+                </div>
               </div>
-              <div className={`p-3 rounded-xl bg-slate-50 ${stat.color}`}>
-                <stat.icon className="w-6 h-6" />
+              <div>
+                <p className="text-2xl sm:text-3xl font-bold text-slate-900 tabular-nums leading-none">
+                  {stat.value}
+                </p>
+                <p
+                  className={`text-xs mt-1.5 leading-snug ${
+                    stat.highlight ? 'text-amber-700 font-semibold' : 'text-slate-500'
+                  }`}
+                >
+                  {stat.sub}
+                </p>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Quick Access */}
-      <div className="pt-2">
-        <h2 className="text-lg font-semibold mb-3 text-slate-900">Módulos Principais</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {shortcuts.map((shortcut, i) => (
+      {/* Prioridade #1 do Plantão: Leitos Ocupados & Pendências */}
+      <Card>
+        <CardHeader className="py-3.5 px-5 border-b border-slate-100 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bed className="w-4 h-4 text-teal-600" />
+            <CardTitle className="text-sm sm:text-base font-semibold text-slate-900">
+              Meus Leitos na Enfermaria ({internados.length})
+            </CardTitle>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/enfermaria')}
+            className="text-teal-700 text-xs h-7 px-2"
+          >
+            Ver todos <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+          </Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          {internados.length === 0 ? (
+            <div className="p-7 text-center space-y-3">
+              <p className="text-sm text-slate-500">
+                Nenhum paciente internado na sua enfermaria no momento.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/enfermaria/novo')}
+                className="border-teal-200 text-teal-700 hover:bg-teal-50"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Admitir primeiro paciente
+              </Button>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {internados.slice(0, 6).map((p) => {
+                const openCount = (p.pendencias || []).filter((item) => !item.done).length;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => navigate(`/enfermaria/paciente/${p.id}`)}
+                    className="px-4 sm:px-5 py-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-200/70 tabular-nums shrink-0">
+                          <Bed className="w-3 h-3" /> {p.bed || 'S/ leito'}
+                        </span>
+                        <span className="font-semibold text-sm text-slate-900 truncate">
+                          {p.name}
+                        </span>
+                        <span className="text-xs text-slate-500 tabular-nums">
+                          {p.age}a · {p.sex}
+                        </span>
+                        <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 tabular-nums">
+                          {calculateDaysInterned(p.admissionDate)}º DIH
+                        </span>
+                        {openCount > 0 && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 tabular-nums">
+                            <AlertCircle className="w-3 h-3" />
+                            {openCount} pendência{openCount > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                      {p.diagnosis && (
+                        <p className="text-xs text-slate-500 truncate">
+                          <span className="font-medium text-slate-600">HD:</span> {p.diagnosis}
+                        </p>
+                      )}
+                    </div>
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0">
+                      Evoluir
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Acesso Rápido aos Módulos */}
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+          Módulos Clínicos
+        </h2>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          {modules.map((mod, i) => (
             <Card
               key={i}
-              className="hover:border-teal-200 hover:shadow-md transition-all cursor-pointer group"
-              onClick={() => navigate(shortcut.to)}
+              className="hover:border-teal-300/80 hover:shadow-sm transition-all cursor-pointer group"
+              onClick={() => navigate(mod.to)}
             >
-              <CardContent className="p-5 flex flex-col h-full">
-                <div className="w-9 h-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center mb-3">
-                  <shortcut.icon className="w-5 h-5" />
+              <CardContent className="p-4 flex flex-col h-full">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2.5 ${mod.tone}`}>
+                  <mod.icon className="w-4 h-4" />
                 </div>
-                <h3 className="font-semibold text-slate-900 group-hover:text-teal-700 transition-colors">
-                  {shortcut.label}
+                <h3 className="font-semibold text-sm text-slate-900 group-hover:text-teal-700 transition-colors">
+                  {mod.label}
                 </h3>
-                <p className="text-xs text-slate-500 mt-1.5 flex-1 leading-relaxed">{shortcut.description}</p>
-                <div className="mt-4 flex items-center text-xs font-semibold text-teal-600">
-                  Acessar módulo <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                </div>
+                <p className="text-xs text-slate-500 mt-1 flex-1 leading-relaxed">
+                  {mod.description}
+                </p>
               </CardContent>
             </Card>
           ))}
         </div>
       </div>
 
-      {/* Pacientes Internados Atualmente */}
+      {/* Barra Compacta de Status do Google Gemini & Compartilhamento */}
       <Card>
-        <CardHeader className="py-4 border-b border-slate-100 flex flex-row items-center justify-between">
-          <CardTitle className="text-base font-semibold text-slate-800">
-            Meus Leitos Ocupados na Enfermaria ({internados.length})
-          </CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/enfermaria')} className="text-teal-600 text-xs">
-            Ver todos <ChevronRight className="w-4 h-4 ml-1" />
-          </Button>
-        </CardHeader>
-        <CardContent className="p-0">
-          {internados.length === 0 ? (
-            <div className="p-8 text-center text-sm text-slate-400">
-              Nenhum paciente internado na sua enfermaria no momento.
+        <CardContent className="p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
             </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {internados.slice(0, 4).map((p) => (
-                <div
-                  key={p.id}
-                  onClick={() => navigate(`/enfermaria/paciente/${p.id}`)}
-                  className="p-4 hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-between gap-4"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-slate-900">{p.name}</span>
-                      <span className="text-xs text-slate-500">
-                        ({p.age}a, {p.sex})
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                      <span className="font-medium text-teal-700 inline-flex items-center">
-                        <Bed className="w-3 h-3 mr-1" /> {p.bed}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>{calculateDaysInterned(p.admissionDate)}º DIH</span>
-                      <span aria-hidden="true">·</span>
-                      <span>HD: {p.diagnosis}</span>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" className="h-8 text-xs shrink-0">
-                    Evoluir Paciente
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* AI Connection Banner (Google Gemini & Built-in) */}
-      <Card className="bg-gradient-to-br from-teal-50 to-white border-teal-100">
-        <CardContent className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-teal-100 text-teal-700 rounded-full shrink-0">
-              <Bot className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-teal-900 text-base mb-1">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">
                 IA Ativa: {getProviderLabel(activeProvider)}
                 {activeProvider === 'builtin' ? ` (${remainingToday}/${dailyLimit} usos hoje)` : ''}
-              </h3>
-              <p className="text-teal-800/80 text-xs max-w-2xl leading-relaxed">
-                Use a IA integrada gratuitamente (cota da turma) ou conecte sua própria chave gratuita do{' '}
-                <strong>Google Gemini (AI Studio)</strong> para ter cota individual com modelos sempre atualizados.
+              </p>
+              <p className="text-xs text-slate-500">
+                Modelos Google Gemini atualizados automaticamente via AI Studio.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <Button
               variant="outline"
+              size="sm"
               onClick={() => setIsAiModalOpen(true)}
-              className="border-teal-300 text-teal-800 bg-white hover:bg-teal-50"
+              className="border-teal-200 text-teal-800 hover:bg-teal-50 text-xs"
             >
-              <Sparkles className="w-4 h-4 mr-1.5 text-teal-600" /> Configurar Google Gemini
+              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-teal-600" /> Configurar Gemini
             </Button>
             <Button
-              onClick={() => navigate('/ai-tools')}
-              className="bg-teal-600 hover:bg-teal-700 text-white"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsShareModalOpen(true)}
+              className="text-xs"
             >
-              Estúdio de Redação
+              <Share2 className="w-3.5 h-3.5 mr-1.5 text-slate-500" /> Compartilhar
             </Button>
           </div>
         </CardContent>

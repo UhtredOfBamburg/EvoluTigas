@@ -1,8 +1,10 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { MULTIMODAL_TYPES } from "./server/prompts";
+import { fetchPublicGoogleDoc } from "./server/googleDocsShared";
 import {
   prepareAiRequestContent,
   finalizeAiOutput,
@@ -255,160 +257,20 @@ async function startServer() {
 
   // Direct Google Docs link reader (works for any account including @discente.ufg.br without OAuth 403)
   app.post("/api/google-doc-public", async (req, res) => {
-    try {
-      const rawInput = String(req.body?.docIdOrUrl || "").trim();
-      const match =
-        rawInput.match(/\/document\/d\/([a-zA-Z0-9-_]+)/) ||
-        rawInput.match(/[?&]id=([a-zA-Z0-9-_]+)/);
-      const docId = match?.[1] || (/^[a-zA-Z0-9-_]{15,}$/.test(rawInput) ? rawInput : null);
-
-      if (!docId) {
-        return res.status(400).json({
-          error: "Link do Google Docs inválido. Cole o link completo (docs.google.com/document/d/...).",
-        });
-      }
-
-      const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
-      const response = await fetch(exportUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; Evolutigas/1.0)",
-        },
-        redirect: "follow",
-      });
-
-      const finalUrl = response.url || "";
-      if (
-        !response.ok ||
-        finalUrl.includes("accounts.google.com") ||
-        finalUrl.includes("ServiceLogin")
-      ) {
-        return res.status(403).json({
-          error:
-            'Este documento está privado. No Google Docs, clique em "Compartilhar" -> "Qualquer pessoa com o link" (Leitor) e tente novamente.',
-        });
-      }
-
-      const rawText = await response.text();
-      if (rawText.trim().startsWith("<!DOCTYPE html") || rawText.trim().startsWith("<html")) {
-        return res.status(403).json({
-          error:
-            'Este documento está restrito. No Google Docs, clique em "Compartilhar" e mude o acesso geral para "Qualquer pessoa com o link".',
-        });
-      }
-
-      // Extract filename/title from Content-Disposition header if present
-      let title = "Documento do Paciente";
-      const disposition = response.headers.get("content-disposition") || "";
-      const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-      const asciiMatch = disposition.match(/filename="([^"]+)"/i);
-      if (utf8Match?.[1]) {
-        try {
-          title = decodeURIComponent(utf8Match[1]).replace(/\.txt$/i, "");
-        } catch {
-          title = utf8Match[1].replace(/\.txt$/i, "");
-        }
-      } else if (asciiMatch?.[1]) {
-        title = asciiMatch[1].replace(/\.txt$/i, "");
-      }
-
-      const cleanText = rawText.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-
-      return res.json({
-        documentId: docId,
-        title,
-        text: cleanText,
-        url: `https://docs.google.com/document/d/${docId}/edit`,
-      });
-    } catch (err: any) {
-      console.error("Error fetching public Google Doc:", err);
-      return res.status(500).json({
-        error: "Erro ao acessar o link do Google Docs. Verifique se o link está correto.",
-      });
+    const result = await fetchPublicGoogleDoc(req.body?.docIdOrUrl);
+    if ("error" in result) {
+      return res.status(result.status).json({ error: result.error });
     }
+    return res.json(result.data);
   });
 
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
-    app.get("/@vite/client", (_req, res) => {
-      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-      res.send(`
-const sheetsMap = new Map();
-export function updateStyle(id, content) {
-  if (typeof document === "undefined") return;
-  let style = sheetsMap.get(id) || document.querySelector(\`style[data-vite-dev-id="\${id}"]\`);
-  if (!style) {
-    style = document.createElement("style");
-    style.setAttribute("type", "text/css");
-    style.setAttribute("data-vite-dev-id", id);
-    style.textContent = content;
-    document.head.appendChild(style);
-  } else {
-    style.textContent = content;
-  }
-  sheetsMap.set(id, style);
-}
-export function removeStyle(id) {
-  const style = sheetsMap.get(id);
-  if (style && style.parentNode) {
-    style.parentNode.removeChild(style);
-    sheetsMap.delete(id);
-  }
-}
-export function createHotContext() {
-  return {
-    accept() {},
-    dispose() {},
-    prune() {},
-    invalidate() {},
-    on() {},
-    off() {},
-    send() {},
-    data: {}
-  };
-}
-export function injectQuery(url) {
-  return url;
-}
-export class ErrorOverlay extends HTMLElement {
-  close() {}
-}
-`);
-    });
-    app.use((req, res, next) => {
-      if (
-        req.path === "/" ||
-        req.path === "/index.html" ||
-        req.path.startsWith("/src/") ||
-        req.path.startsWith("/node_modules/.vite/") ||
-        req.path.startsWith("/@")
-      ) {
-        delete req.headers["if-none-match"];
-        delete req.headers["if-modified-since"];
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-        const origSetHeader = res.setHeader.bind(res);
-        res.setHeader = (name: string, value: any) => {
-          if (name.toLowerCase() === "cache-control") {
-            return origSetHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-          }
-          return origSetHeader(name, value);
-        };
-      }
-      next();
-    });
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: { server: httpServer } },
       appType: "spa",
     });
-    const depsOptimizer = (vite as any).environments?.client?.depsOptimizer;
-    if (depsOptimizer?.init) {
-      await depsOptimizer.init().catch(() => {});
-    }
-    if (depsOptimizer?.scanProcessing) {
-      await depsOptimizer.scanProcessing.catch(() => {});
-    }
-    await vite.warmupRequest("/src/main.tsx").catch(() => {});
-    await vite.warmupRequest("/src/App.tsx").catch(() => {});
-    await vite.warmupRequest("/src/hooks/useToast.tsx").catch(() => {});
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
@@ -418,7 +280,7 @@ export class ErrorOverlay extends HTMLElement {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

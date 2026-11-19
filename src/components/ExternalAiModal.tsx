@@ -35,13 +35,9 @@ const GOOGLE_AI_STUDIO_API_KEY_URL = 'https://aistudio.google.com/apikey';
 
 function getDefaultShareUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
-    const origin = window.location.origin;
-    if (origin.includes('ais-dev-')) {
-      return origin.replace('ais-dev-', 'ais-pre-');
-    }
-    return origin;
+    return window.location.origin;
   }
-  return 'https://ais-pre-udbnqqvyacc4t5tlx4i7yz-168094059850.us-west2.run.app';
+  return '';
 }
 
 export function getProviderLabel(provider: AiChatProvider): string {

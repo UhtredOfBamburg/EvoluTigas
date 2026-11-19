@@ -104,7 +104,6 @@ export default defineConfig(() => {
         'react/jsx-dev-runtime',
         'react-router-dom',
         'lucide-react',
-        'motion/react',
         '@pedi-growth/core',
         'clsx',
         'firebase/app',
@@ -123,9 +122,9 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-router-dom', 'motion'],
-            'vendor-pdf': ['jspdf', 'pdf-lib', 'pdfjs-dist', 'html2canvas'],
-            'vendor-charts': ['recharts', '@pedi-growth/core', 'who-growth'],
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-pdf': ['jspdf', 'pdf-lib', 'pdfjs-dist'],
+            'vendor-charts': ['recharts', '@pedi-growth/core'],
             'vendor-firebase': ['firebase/app', 'firebase/firestore', 'firebase/auth'],
           },
         },
@@ -135,7 +134,6 @@ export default defineConfig(() => {
     server: {
       host: '0.0.0.0',
       port: 3000,
-      hmr: false,
     },
   };
 });
