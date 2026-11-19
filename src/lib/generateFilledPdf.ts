@@ -1,6 +1,7 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import type { jsPDF as JsPDFType } from 'jspdf';
 import type { FormField, FormTemplate, MedicationItem } from '@/types/formTemplate';
+import { isAihTemplate, normalizeAihTemplate } from '@/lib/aihFieldsLayout';
 
 const CHECKED_VALUES = new Set(['true', 'sim', 'on', '1', 'x', 'yes', 'marcado']);
 
@@ -264,6 +265,9 @@ export function getCanonicalFieldInfo(
   field: FormField,
   template?: FormTemplate | null
 ): { key: string; label: string } {
+  if (isAihTemplate(template)) {
+    return { key: field.id, label: field.label };
+  }
   if (isPrescriptionField(field, template)) {
     return { key: '__prescription__', label: 'Prescrição' };
   }
@@ -584,7 +588,7 @@ export async function generateFilledPdf(
   values: Record<string, string>,
   optionsOrFontSize?: number | GeneratePdfOptions
 ): Promise<Uint8Array> {
-  const template = ensureReceitaDateField(rawTemplate);
+  const template = normalizeAihTemplate(ensureReceitaDateField(rawTemplate));
   const opts: GeneratePdfOptions =
     typeof optionsOrFontSize === 'number'
       ? { globalFontSize: optionsOrFontSize }
@@ -660,10 +664,11 @@ export async function generateFilledPdf(
 
     if (field.type === 'checkbox') {
       if (CHECKED_VALUES.has(String(raw).toLowerCase().trim())) {
-        const markSize = Math.max(7, Math.min(fontSize + 1, boxH * 0.85));
+        const markSize = Math.max(6.5, Math.min(fontSize + 0.5, boxH * 0.92));
+        const xW = fontBold.widthOfTextAtSize('X', markSize);
         page.drawText('X', {
-          x: boxX + boxW / 2 - markSize * 0.32,
-          y: height - boxYTop - boxH / 2 - markSize * 0.36,
+          x: boxX + (boxW - xW) / 2,
+          y: height - boxYTop - boxH / 2 - markSize * 0.35,
           size: markSize,
           font: fontBold,
           color: rgb(0, 0, 0),
@@ -673,6 +678,99 @@ export async function generateFilledPdf(
     }
 
     const value = field.type === 'date' ? formatDateBr(raw) : raw;
+    const alignMode: VerticalAlignMode =
+      mirroredAlignments[field.id] ||
+      (field.slashDateSlots || field.combCells || field.combCellX ? 'middle' : 'bottom');
+
+    const computeSingleLineY = (sizePt: number): number => {
+      if (alignMode === 'top') {
+        return height - boxYTop - Math.min(boxH * 0.52, sizePt + 1);
+      }
+      if (alignMode === 'middle') {
+        return height - boxYTop - boxH / 2 - sizePt * 0.34;
+      }
+      return height - boxYTop - Math.max(sizePt, boxH - 2);
+    };
+
+    // 1. Slash-separated date fields (e.g. SUS AIH "__/__/____" with pre-printed slashes)
+    if (field.slashDateSlots && field.slashDateSlots.length === 6) {
+      const cleanVal = sanitizeWinAnsi(String(value)).trim();
+      let parts: [string, string, string] | null = null;
+      const slashMatch = cleanVal.match(/^(\d{1,2})[/\-.\s]+(\d{1,2})[/\-.\s]+(\d{2,4})$/);
+      if (slashMatch) {
+        parts = [slashMatch[1].padStart(2, '0'), slashMatch[2].padStart(2, '0'), slashMatch[3]];
+      } else {
+        const digitsOnly = cleanVal.replace(/\D/g, '');
+        if (digitsOnly.length >= 6) {
+          parts = [digitsOnly.slice(0, 2), digitsOnly.slice(2, 4), digitsOnly.slice(4, 8)];
+        }
+      }
+
+      if (parts) {
+        const [dL, dR, mL, mR, yL, yR] = field.slashDateSlots;
+        const slots: Array<[number, number, string]> = [
+          [dL * width, dR * width, parts[0]],
+          [mL * width, mR * width, parts[1]],
+          [yL * width, yR * width, parts[2]],
+        ];
+        const effSize = Math.min(fontSize, Math.max(6.5, boxH * 0.82));
+        const yPos = computeSingleLineY(effSize);
+        for (const [sL, sR, textPart] of slots) {
+          if (!textPart) continue;
+          const slotW = Math.max(6, sR - sL);
+          const textW = font.widthOfTextAtSize(textPart, effSize);
+          const drawSize = textW > slotW - 1 ? effSize * ((slotW - 1) / textW) : effSize;
+          const drawW = font.widthOfTextAtSize(textPart, drawSize);
+          page.drawText(textPart, {
+            x: sL + (slotW - drawW) / 2,
+            y: yPos,
+            size: drawSize,
+            font,
+            color: rgb(0.04, 0.04, 0.08),
+          });
+        }
+        continue;
+      }
+    }
+
+    // 2. Comb-cell / divided-box fields (CNES, CNS, Telefone, UF, CEP, SIGTAP, CPF, CNPJ)
+    if ((field.combCellX && field.combCellX.length >= 2) || (field.combCells && field.combCells > 0)) {
+      const cellBoundsPts: number[] =
+        field.combCellX && field.combCellX.length >= 2
+          ? field.combCellX.map((xn) => xn * width)
+          : Array.from(
+              { length: (field.combCells || 1) + 1 },
+              (_, idx) => boxX + (boxW * idx) / (field.combCells || 1)
+            );
+      const cellCount = cellBoundsPts.length - 1;
+      const digitsOnly = field.combDigitsOnly !== false;
+      const cleanedComb = digitsOnly
+        ? sanitizeWinAnsi(String(value)).replace(/[^0-9]/g, '')
+        : sanitizeWinAnsi(String(value)).replace(/\s+/g, '').toUpperCase();
+
+      if (cleanedComb.length > 0 && cellCount > 0) {
+        const minCellW = Math.min(
+          ...Array.from({ length: cellCount }, (_, i) => Math.max(4, cellBoundsPts[i + 1] - cellBoundsPts[i]))
+        );
+        const effSize = Math.min(fontSize, Math.max(6.5, minCellW * 1.1), Math.max(6.5, boxH * 0.85));
+        const yPos = computeSingleLineY(effSize);
+        const chars = cleanedComb.slice(0, cellCount).split('');
+
+        chars.forEach((ch, idx) => {
+          const cL = cellBoundsPts[idx];
+          const cW = cellBoundsPts[idx + 1] - cL;
+          const chW = font.widthOfTextAtSize(ch, effSize);
+          page.drawText(ch, {
+            x: cL + (cW - chW) / 2,
+            y: yPos,
+            size: effSize,
+            font,
+            color: rgb(0.04, 0.04, 0.08),
+          });
+        });
+        continue;
+      }
+    }
 
     if (isRequestedExamsField(field, template)) {
       const rawItems = String(value)
@@ -804,22 +902,11 @@ export async function generateFilledPdf(
     const isSingleLine = field.type === 'text' || field.type === 'date';
     const maxLines = isSingleLine ? 1 : Math.max(1, Math.floor((boxH + lineHeight * 0.35) / lineHeight));
     const lines = wrapText(value, font, fontSize, Math.max(boxW - 4, 12)).slice(0, maxLines);
-    const alignMode: VerticalAlignMode = mirroredAlignments[field.id] || 'bottom';
 
     lines.forEach((line, i) => {
-      let yOffset: number;
-      if (isSingleLine) {
-        if (alignMode === 'top') {
-          yOffset = height - boxYTop - Math.min(boxH * 0.52, fontSize + 1);
-        } else if (alignMode === 'middle') {
-          yOffset = height - boxYTop - boxH / 2 - fontSize * 0.34;
-        } else {
-          // 'bottom' (baseline sits neatly on the line)
-          yOffset = height - boxYTop - Math.max(fontSize, boxH - 2);
-        }
-      } else {
-        yOffset = height - boxYTop - fontSize - 1 - i * lineHeight;
-      }
+      const yOffset = isSingleLine
+        ? computeSingleLineY(fontSize)
+        : height - boxYTop - fontSize - 1 - i * lineHeight;
 
       page.drawText(line, {
         x: boxX + 2,

@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { MULTIMODAL_TYPES } from "./server/prompts";
 import { fetchPublicGoogleDoc } from "./server/googleDocsShared";
+import { searchLiveCnes } from "./server/cnesShared";
 import {
   prepareAiRequestContent,
   finalizeAiOutput,
@@ -262,6 +263,17 @@ async function startServer() {
       return res.status(result.status).json({ error: result.error });
     }
     return res.json(result.data);
+  });
+
+  // Official DATASUS CNES live lookup proxy (by CNES code or IBGE municipality)
+  app.post("/api/cnes-search", async (req, res) => {
+    try {
+      const { cnes, codigoMunicipio6, queryText } = req.body ?? {};
+      const items = await searchLiveCnes({ cnes, codigoMunicipio6, queryText });
+      return res.json({ items });
+    } catch {
+      return res.json({ items: [] });
+    }
   });
 
   const httpServer = http.createServer(app);

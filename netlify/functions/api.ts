@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { fetchPublicGoogleDoc } from '../../server/googleDocsShared';
+import { searchLiveCnes } from '../../server/cnesShared';
 import {
   prepareAiRequestContent,
   finalizeAiOutput,
@@ -138,6 +139,20 @@ export async function handler(event: any) {
       return jsonResponse(result.status, { error: result.error });
     }
     return jsonResponse(200, result.data);
+  }
+
+  // 2b. /api/cnes-search
+  if (pathStr.endsWith('/cnes-search')) {
+    try {
+      const items = await searchLiveCnes({
+        cnes: body?.cnes,
+        codigoMunicipio6: body?.codigoMunicipio6,
+        queryText: body?.queryText,
+      });
+      return jsonResponse(200, { items });
+    } catch {
+      return jsonResponse(200, { items: [] });
+    }
   }
 
   // 3. /api/generate-evolucao

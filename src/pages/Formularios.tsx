@@ -49,6 +49,17 @@ import {
 import { prepareFileInlineData } from '@/lib/fileToBase64';
 import { PdfLiveViewer } from '@/components/formularios/PdfLiveViewer';
 import { ExamSelectorBlock } from '@/components/formularios/ExamSelectorBlock';
+import { SusAutocompleteInput } from '@/components/formularios/SusAutocompleteInput';
+import {
+  isAihTemplate,
+  normalizeAihTemplate,
+  detectAihSmartFieldRole,
+  SUS_CLINICAS,
+  SUS_CARATER_INTERNACAO,
+  SUS_RACA_COR,
+  type AihSmartFieldRole,
+} from '@/lib/aihFieldsLayout';
+import { lookupCep } from '@/lib/susData';
 import type { FormField, FormTemplate, MedicationItem } from '@/types/formTemplate';
 
 const QUANTIDADE_SUGGESTIONS = [
@@ -172,18 +183,23 @@ export default function Formularios() {
     }
   };
 
-  // Resolve activeTemplate from user templates (ensuring Receitas always have Data de Solicitação)
+  // Resolve activeTemplate from user templates (normalizing AIH boxes and Receita date fields)
   useEffect(() => {
-    const custom = templates.find((t) => t.id === formType);
+    const custom =
+      templates.find((t) => t.id === formType) ||
+      (formType === 'aih' ? templates.find((t) => isAihTemplate(t)) : undefined);
     if (custom) {
-      setActiveTemplate(ensureReceitaDateField(custom));
+      if (custom.id !== formType) {
+        setFormType(custom.id);
+      }
+      setActiveTemplate(normalizeAihTemplate(ensureReceitaDateField(custom)));
       setIsLoadingTemplate(false);
       return;
     }
 
     if (templates.length > 0 && (!formType || !templates.some((t) => t.id === formType))) {
       setFormType(templates[0].id);
-      setActiveTemplate(ensureReceitaDateField(templates[0]));
+      setActiveTemplate(normalizeAihTemplate(ensureReceitaDateField(templates[0])));
       setIsLoadingTemplate(false);
       return;
     }
@@ -205,7 +221,7 @@ export default function Formularios() {
       const lower = f.label.toLowerCase();
       const isReqDate = isDateField(f) && !lower.includes('nascimento');
       initialSizes[f.id] = f.fontSize || (isReqDate ? 12.06 : 10);
-      initialAligns[f.id] = 'bottom';
+      initialAligns[f.id] = f.slashDateSlots || f.combCells || f.combCellX ? 'middle' : 'bottom';
 
       // Pre-fill from location.state if navigating from Ambulatório or Enfermaria
       if (locState.patientName && (lower.includes('paciente') || f.id === 'nome')) {
@@ -335,6 +351,56 @@ export default function Formularios() {
       });
       return next;
     });
+  };
+
+  const setFieldsByRole = (
+    updates: Partial<Record<NonNullable<AihSmartFieldRole>, string>>,
+    options?: { onlyIfEmpty?: Array<NonNullable<AihSmartFieldRole>> }
+  ) => {
+    if (!activeTemplate) return;
+    const onlyEmptySet = new Set(options?.onlyIfEmpty || []);
+    setTemplateValues((prev) => {
+      const next = { ...prev };
+      activeTemplate.fields.forEach((f) => {
+        const role = detectAihSmartFieldRole(f.label);
+        if (!role) return;
+        const val = updates[role];
+        if (val === undefined) return;
+        if (onlyEmptySet.has(role) && (next[f.id] || '').trim()) return;
+        next[f.id] = val;
+      });
+      return next;
+    });
+  };
+
+  const getValueByRole = (role: NonNullable<AihSmartFieldRole>): string => {
+    if (!activeTemplate) return '';
+    const match = activeTemplate.fields.find((f) => detectAihSmartFieldRole(f.label) === role);
+    return match ? templateValues[match.id] || '' : '';
+  };
+
+  const [isLookingUpCep, setIsLookingUpCep] = useState(false);
+  const handleCepLookup = async (rawCep: string) => {
+    const digits = rawCep.replace(/\D/g, '');
+    if (digits.length !== 8) return;
+    setIsLookingUpCep(true);
+    try {
+      const info = await lookupCep(digits);
+      if (!info) {
+        toast('CEP não encontrado. Você pode preencher o endereço manualmente.', 'info');
+        return;
+      }
+      const enderecoAuto = [info.logradouro, info.bairro].filter(Boolean).join(' - ').toUpperCase();
+      setFieldsByRole({
+        ...(enderecoAuto ? { endereco: enderecoAuto } : {}),
+        ...(info.localidade ? { municipio: info.localidade.toUpperCase() } : {}),
+        ...(info.ibge ? { ibge: info.ibge } : {}),
+        ...(info.uf ? { uf: info.uf.toUpperCase() } : {}),
+      });
+      toast(`Endereço preenchido para ${info.localidade}/${info.uf} (IBGE ${info.ibge})!`, 'success');
+    } finally {
+      setIsLookingUpCep(false);
+    }
   };
 
   const adjustGroupFontSize = (groupFields: FormField[], delta: number, defaultSize = 10) => {
@@ -565,7 +631,7 @@ export default function Formularios() {
 
   const handleCustomizeTemplateBoxes = async () => {
     if (!activeTemplate) return;
-    const enriched = ensureReceitaDateField(activeTemplate);
+    const enriched = normalizeAihTemplate(ensureReceitaDateField(activeTemplate));
     if (activeTemplate.isBuiltIn) {
       const copyId = `tpl_${activeTemplate.id}_${Date.now()}`;
       const copyTemplate: FormTemplate = {
@@ -1300,10 +1366,17 @@ export default function Formularios() {
                   const isBirthDate = isDate && group.label.toLowerCase().includes('nascimento');
                   const defaultFieldPt = isDate && !isBirthDate ? 12.06 : 10;
                   const effectivePt = fieldFontSizes[field.id] ?? field.fontSize ?? defaultFieldPt;
-                  const currentAlign: VerticalAlignMode = fieldAlignments[field.id] || 'bottom';
+                  const currentAlign: VerticalAlignMode =
+                    fieldAlignments[field.id] ||
+                    (field.slashDateSlots || field.combCells || field.combCellX ? 'middle' : 'bottom');
                   const isExamList = isRequestedExamsField(field, activeTemplate);
                   const isSexoField =
                     group.label.toLowerCase().includes('sexo') && field.type !== 'checkbox';
+                  const smartRole = field.type === 'text' ? detectAihSmartFieldRole(group.label) : null;
+                  const activeCidPrincipal =
+                    smartRole === 'procedimento_nome' || smartRole === 'procedimento_codigo'
+                      ? getValueByRole('cid_principal')
+                      : '';
 
                   return (
                     <div key={group.key} className="space-y-2.5">
@@ -1637,6 +1710,186 @@ export default function Formularios() {
                           placeholder={group.label}
                           className="min-h-[96px] rounded-xl border-slate-200 text-sm"
                         />
+                      ) : smartRole === 'cnes_solicitante_nome' || smartRole === 'cnes_solicitante_cod' ? (
+                        /* G1. Estabelecimento / CNES Solicitante (DATASUS CNES) */
+                        <div className="space-y-1.5">
+                          <SusAutocompleteInput
+                            kind="cnes"
+                            value={currentVal}
+                            onChange={(val) => setGroupValue(groupFields, val)}
+                            placeholder="Busca por CNES, nome ou município..."
+                            onSelectCnes={(item) => {
+                              setFieldsByRole({
+                                cnes_solicitante_nome: item.nome,
+                                cnes_solicitante_cod: item.cnes,
+                              });
+                              toast(`Estabelecimento preenchido: ${item.nome} (CNES ${item.cnes})`, 'success');
+                            }}
+                          />
+                          {smartRole === 'cnes_solicitante_nome' && (
+                            <p className="text-[11px] text-slate-400 pl-2">
+                              Selecionar o hospital preenche automaticamente o Nome (1) e o CNES (2).
+                            </p>
+                          )}
+                        </div>
+                      ) : smartRole === 'cnes_executante_nome' || smartRole === 'cnes_executante_cod' ? (
+                        /* G2. Estabelecimento / CNES Executante (DATASUS CNES + 1-click Copy from Solicitante) */
+                        <div className="space-y-1.5">
+                          <SusAutocompleteInput
+                            kind="cnes"
+                            value={currentVal}
+                            onChange={(val) => setGroupValue(groupFields, val)}
+                            placeholder="Busca por CNES, nome ou município..."
+                            onSelectCnes={(item) => {
+                              setFieldsByRole({
+                                cnes_executante_nome: item.nome,
+                                cnes_executante_cod: item.cnes,
+                              });
+                              toast(`Executante preenchido: ${item.nome} (CNES ${item.cnes})`, 'success');
+                            }}
+                          />
+                          {smartRole === 'cnes_executante_nome' &&
+                            (getValueByRole('cnes_solicitante_nome') || getValueByRole('cnes_solicitante_cod')) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFieldsByRole({
+                                    cnes_executante_nome: getValueByRole('cnes_solicitante_nome'),
+                                    cnes_executante_cod: getValueByRole('cnes_solicitante_cod'),
+                                  });
+                                  toast('Copiado estabelecimento e CNES do Solicitante!', 'success');
+                                }}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100/80 border border-teal-200 px-2.5 py-1 rounded-full transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                                Usar mesmo estabelecimento do Solicitante (1 e 2)
+                              </button>
+                            )}
+                        </div>
+                      ) : smartRole === 'municipio' ? (
+                        /* G3. Município IBGE -> auto-fills Município (16) + Cód. IBGE (17) + UF (18) */
+                        <div className="space-y-1.5">
+                          <SusAutocompleteInput
+                            kind="municipio"
+                            value={currentVal}
+                            onChange={(val) => setGroupValue(groupFields, val)}
+                            placeholder="Busque o município (ex: Goiânia) ou código IBGE..."
+                            onSelectMunicipio={(item) => {
+                              setFieldsByRole({
+                                municipio: item.nome.toUpperCase(),
+                                ibge: item.ibge7,
+                                uf: item.uf.toUpperCase(),
+                              });
+                              toast(`${item.nome}/${item.uf} · IBGE ${item.ibge7} preenchido!`, 'success');
+                            }}
+                          />
+                          <p className="text-[11px] text-slate-400 pl-2">
+                            Ao selecionar, preenche automaticamente Município, Código IBGE e UF.
+                          </p>
+                        </div>
+                      ) : smartRole === 'cep' ? (
+                        /* G4. CEP with instant ViaCEP lookup */
+                        <div className="relative flex items-center">
+                          <Input
+                            value={currentVal}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 8);
+                              const masked =
+                                digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
+                              setGroupValue(groupFields, masked);
+                              if (digits.length === 8) {
+                                handleCepLookup(digits);
+                              }
+                            }}
+                            placeholder="00000-000"
+                            className="h-11 rounded-full border-slate-200 bg-white pl-4 pr-28 text-sm font-mono tabular-nums"
+                          />
+                          <button
+                            type="button"
+                            disabled={isLookingUpCep || currentVal.replace(/\D/g, '').length !== 8}
+                            onClick={() => handleCepLookup(currentVal)}
+                            className="absolute right-2 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-teal-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-teal-800 disabled:opacity-40 transition-colors"
+                          >
+                            {isLookingUpCep ? 'Buscando...' : 'Buscar CEP'}
+                          </button>
+                        </div>
+                      ) : smartRole === 'cid_principal' ||
+                        smartRole === 'cid_secundario' ||
+                        smartRole === 'cid_associadas' ? (
+                        /* G5. CID-10 Oficial DATASUS (busca por código ou doença) */
+                        <div className="space-y-1.5">
+                          <SusAutocompleteInput
+                            kind="cid10"
+                            value={currentVal}
+                            onChange={(val) => setGroupValue(groupFields, val)}
+                            placeholder="Busca por CID-10 ou diagnóstico..."
+                            onSelectCid={(item) => {
+                              setGroupValue(groupFields, item.code);
+                              if (smartRole === 'cid_principal') {
+                                setFieldsByRole(
+                                  { diagnostico_inicial: item.description },
+                                  { onlyIfEmpty: ['diagnostico_inicial'] }
+                                );
+                              }
+                              toast(`CID-10 ${item.code} — ${item.description}`, 'success');
+                            }}
+                          />
+                          {smartRole === 'cid_principal' && (
+                            <p className="text-[11px] text-slate-400 pl-2">
+                              Digite o CID (ex: J18.9) ou a doença (ex: pneumonia) — sugere os procedimentos SIGTAP compatíveis abaixo.
+                            </p>
+                          )}
+                        </div>
+                      ) : smartRole === 'procedimento_nome' || smartRole === 'procedimento_codigo' ? (
+                        /* G6. Procedimento SUS — Tabela Oficial SIGTAP (busca por nome ou código) */
+                        <div className="space-y-1.5">
+                          <SusAutocompleteInput
+                            kind="sigtap"
+                            value={currentVal}
+                            relatedCidCode={activeCidPrincipal}
+                            onChange={(val) => setGroupValue(groupFields, val)}
+                            placeholder="Busque pelo nome do procedimento ou código SIGTAP..."
+                            onSelectSigtap={(item) => {
+                              setFieldsByRole({
+                                procedimento_nome: item.name,
+                                procedimento_codigo: item.formattedCode,
+                              });
+                              toast(`SIGTAP ${item.formattedCode} — ${item.name}`, 'success');
+                            }}
+                          />
+                          {smartRole === 'procedimento_nome' && (
+                            <p className="text-[11px] text-slate-400 pl-2">
+                              Tabela SIGTAP oficial (DATASUS): preenche Descrição (27) e Código nos 10 quadradinhos (28).
+                            </p>
+                          )}
+                        </div>
+                      ) : smartRole === 'clinica' || smartRole === 'carater' || smartRole === 'raca_cor' ? (
+                        /* G7. Official SUS Selectors (Clínica, Caráter da Internação, Raça/Cor) */
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <select
+                            value={currentVal}
+                            onChange={(e) => setGroupValue(groupFields, e.target.value)}
+                            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-teal-500 flex-1"
+                          >
+                            <option value="">Selecionar padrão SUS...</option>
+                            {(smartRole === 'clinica'
+                              ? SUS_CLINICAS
+                              : smartRole === 'carater'
+                              ? SUS_CARATER_INTERNACAO
+                              : SUS_RACA_COR
+                            ).map((opt) => (
+                              <option key={opt.code} value={opt.label}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <Input
+                            value={currentVal}
+                            onChange={(e) => setGroupValue(groupFields, e.target.value)}
+                            placeholder="Ou digite..."
+                            className="h-11 rounded-xl border-slate-200 text-sm sm:w-44"
+                          />
+                        </div>
                       ) : (
                         /* G. Standard Single-line Input */
                         <Input

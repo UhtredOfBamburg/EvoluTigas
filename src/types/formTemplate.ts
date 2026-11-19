@@ -12,6 +12,14 @@ export interface FormField {
   hNorm: number;
   fontSize?: number;
   required?: boolean;
+  /** Uniform character-cell comb rendering (e.g. 7 for CNES, 10 for SIGTAP, 15 for CNS). */
+  combCells?: number;
+  /** Exact normalized [x0, x1, ..., xN] cell borders for comb boxes (handles unequal DDD+phone widths). */
+  combCellX?: number[];
+  /** Strip punctuation before placing digits into comb cells (default true when combCells/combCellX set). */
+  combDigitsOnly?: boolean;
+  /** Exact normalized [dayL, dayR, monthL, monthR, yearL, yearR] X bounds around printed '/' date slashes. */
+  slashDateSlots?: [number, number, number, number, number, number];
 }
 
 export interface TemplatePage {
