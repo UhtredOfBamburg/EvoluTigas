@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Stethoscope,
   Bed,
+  BookOpenCheck,
   ScanText,
   Calculator,
   Plus,
@@ -100,6 +101,13 @@ export default function Dashboard() {
       tone: 'bg-blue-50 text-blue-700',
     },
     {
+      label: 'Guia de Prescrições',
+      to: '/prescricoes',
+      description: 'Condutas PS e receitas prontas com envio direto para Formulários',
+      icon: BookOpenCheck,
+      tone: 'bg-teal-50 text-teal-700',
+    },
+    {
       label: 'Transcritor de Exames',
       to: '/transcritor',
       description: 'Extrai exames com (VR) automático de fotos e PDFs',
@@ -145,6 +153,14 @@ export default function Dashboard() {
           </h1>
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/prescricoes')}
+            className="h-9 text-xs sm:text-sm"
+          >
+            <BookOpenCheck className="w-4 h-4 mr-1.5 text-teal-600" /> Guia de Prescrições
+          </Button>
           <Button
             variant="outline"
             size="sm"

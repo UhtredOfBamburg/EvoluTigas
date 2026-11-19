@@ -18,6 +18,7 @@ const EnfermariaList = lazy(() => import('./pages/Enfermaria/EnfermariaList'));
 const PatientDetails = lazy(() => import('./pages/Enfermaria/PatientDetails'));
 const PatientNew = lazy(() => import('./pages/Enfermaria/PatientNew'));
 const Ambulatorio = lazy(() => import('./pages/Ambulatorio'));
+const Prescricoes = lazy(() => import('./pages/Prescricoes'));
 const Formularios = lazy(() => import('./pages/Formularios'));
 const CriarFormulario = lazy(() => import('./pages/formularios/CriarFormulario'));
 const TranscritorExames = lazy(() => import('./pages/TranscritorExames'));
@@ -58,6 +59,7 @@ export default function App() {
                 <Route path="enfermaria/novo" element={<Page><PatientNew /></Page>} />
                 <Route path="enfermaria/paciente/:id" element={<Page><PatientDetails /></Page>} />
                 <Route path="ambulatorio" element={<Page><Ambulatorio /></Page>} />
+                <Route path="prescricoes" element={<Page><Prescricoes /></Page>} />
                 <Route path="formularios" element={<Page><Formularios /></Page>} />
                 <Route path="formularios/meus" element={<Page><Formularios /></Page>} />
                 <Route path="formularios/novo" element={<Page><CriarFormulario /></Page>} />

@@ -60,7 +60,9 @@ html.night-shift .bg-slate-50\/70,
 html.night-shift .bg-slate-50\/80,
 html.night-shift .bg-slate-100,
 html.night-shift .bg-slate-100\/70,
-html.night-shift .bg-slate-100\/80 {
+html.night-shift .bg-slate-100\/80,
+html.night-shift .bg-slate-100\/90,
+html.night-shift .bg-slate-100\/95 {
   background-color: var(--night-surface-subtle) !important;
   color: #cbd5e1 !important;
 }
@@ -110,9 +112,11 @@ html.night-shift .text-slate-400 {
 
 /* Superfícies coloridas suaves (teal, blue, indigo, emerald, purple, amber, red, rose, orange, cyan) */
 html.night-shift .bg-teal-50,
+html.night-shift .bg-teal-50\/40,
 html.night-shift .bg-teal-50\/50,
 html.night-shift .bg-teal-50\/60,
 html.night-shift .bg-teal-50\/70,
+html.night-shift .bg-teal-50\/75,
 html.night-shift .bg-teal-100 {
   background-color: rgba(13, 148, 136, 0.16) !important;
   color: #5eead4 !important;
@@ -125,9 +129,13 @@ html.night-shift .text-teal-700 {
 }
 html.night-shift .border-teal-100,
 html.night-shift .border-teal-200,
+html.night-shift .border-teal-200\/60,
+html.night-shift .border-teal-200\/80,
+html.night-shift .border-teal-200\/90,
 html.night-shift .border-teal-300,
-html.night-shift .border-teal-300\/80 {
-  border-color: rgba(45, 212, 191, 0.28) !important;
+html.night-shift .border-teal-300\/80,
+html.night-shift .border-teal-300\/90 {
+  border-color: rgba(45, 212, 191, 0.3) !important;
 }
 
 html.night-shift .bg-blue-50,
@@ -197,12 +205,15 @@ html.night-shift .border-green-200 {
 
 html.night-shift .bg-amber-50,
 html.night-shift .bg-amber-50\/70,
+html.night-shift .bg-amber-50\/75,
 html.night-shift .bg-amber-50\/80,
 html.night-shift .bg-amber-100,
 html.night-shift .bg-orange-50 {
   background-color: rgba(217, 119, 6, 0.18) !important;
-  color: #fcd34d !important;
+  color: #fde68a !important;
 }
+html.night-shift .text-amber-950,
+html.night-shift .text-amber-950\/90,
 html.night-shift .text-amber-900,
 html.night-shift .text-amber-800,
 html.night-shift .text-amber-700,
@@ -210,6 +221,8 @@ html.night-shift .text-orange-800 {
   color: #fcd34d !important;
 }
 html.night-shift .border-amber-200,
+html.night-shift .border-amber-200\/60,
+html.night-shift .border-amber-200\/80,
 html.night-shift .border-amber-300 {
   border-color: rgba(251, 191, 36, 0.3) !important;
 }

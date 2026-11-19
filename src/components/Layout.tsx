@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Stethoscope,
+  BookOpenCheck,
   FileText,
   Calculator,
   Bot,
@@ -67,10 +68,11 @@ export default function Layout() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Menu Inicial', mobileLabel: 'Início', inBottomBar: true },
     { to: '/enfermaria', icon: Activity, label: 'Enfermaria', mobileLabel: 'Enfermaria', inBottomBar: true },
-    { to: '/ambulatorio', icon: Stethoscope, label: 'Ambulatório', mobileLabel: 'Ambulatório', inBottomBar: true },
+    { to: '/ambulatorio', icon: Stethoscope, label: 'Ambulatório', mobileLabel: 'Ambulatório', inBottomBar: false },
+    { to: '/prescricoes', icon: BookOpenCheck, label: 'Guia de Prescrições', mobileLabel: 'Prescrições', inBottomBar: true },
     { to: '/transcritor', icon: ScanText, label: 'Transcritor de Exames', mobileLabel: 'Exames', inBottomBar: true },
-    { to: '/calculadoras', icon: Calculator, label: 'Calculadoras & DVA', mobileLabel: 'Calcs', inBottomBar: true },
-    { to: '/formularios', icon: FileText, label: 'Central de Formulários', mobileLabel: 'Docs', inBottomBar: false },
+    { to: '/calculadoras', icon: Calculator, label: 'Calculadoras & DVA', mobileLabel: 'Calcs', inBottomBar: false },
+    { to: '/formularios', icon: FileText, label: 'Central de Formulários', mobileLabel: 'Formulários', inBottomBar: true },
     { to: '/ai-tools', icon: Bot, label: 'Estúdio de Redação IA', mobileLabel: 'IA', inBottomBar: false },
   ];
 

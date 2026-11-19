@@ -42,6 +42,9 @@ import {
   isRequestedExamsField,
   isDateField,
   isHalfSheetSingleViaTemplate,
+  isReceitaTemplate,
+  isControleEspecialTemplate,
+  isExamFormTemplate,
   ensureReceitaDateField,
   type VerticalAlignMode,
   type HalfSheetLayoutMode,
@@ -95,6 +98,38 @@ function maskDateBrInput(raw: string): string {
   if (digits.length <= 2) return digits;
   if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
   return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+}
+
+function resolveFormTemplate(targetType: string, list: FormTemplate[]): FormTemplate | undefined {
+  if (!targetType || list.length === 0) return undefined;
+  const exact = list.find((t) => t.id === targetType);
+  if (exact) return exact;
+
+  if (targetType === 'receita_controle') {
+    return list.find((t) => isControleEspecialTemplate(t)) || list.find((t) => isReceitaTemplate(t));
+  }
+  if (targetType === 'receita_simples') {
+    return (
+      list.find((t) => isReceitaTemplate(t) && !isControleEspecialTemplate(t)) ||
+      list.find((t) => isReceitaTemplate(t))
+    );
+  }
+  if (targetType === 'pedido_exames') {
+    return list.find((t) => isExamFormTemplate(t));
+  }
+  if (targetType === 'encaminhamento') {
+    return list.find((t) =>
+      (t.name || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .includes('encaminh')
+    );
+  }
+  if (targetType === 'aih') {
+    return list.find((t) => isAihTemplate(t));
+  }
+  return undefined;
 }
 
 export default function Formularios() {
@@ -183,11 +218,20 @@ export default function Formularios() {
     }
   };
 
+  const appliedLocationKeyRef = useRef<string>('');
+
+  // Keep formType synchronized when navigating with a new location.state
+  useEffect(() => {
+    const incomingForm = (locState.selectedForm || locState.formType || '') as string;
+    if (incomingForm) {
+      setFormType(incomingForm);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
   // Resolve activeTemplate from user templates (normalizing AIH boxes and Receita date fields)
   useEffect(() => {
-    const custom =
-      templates.find((t) => t.id === formType) ||
-      (formType === 'aih' ? templates.find((t) => isAihTemplate(t)) : undefined);
+    const custom = resolveFormTemplate(formType, templates);
     if (custom) {
       if (custom.id !== formType) {
         setFormType(custom.id);
@@ -209,25 +253,38 @@ export default function Formularios() {
     setIsLoadingTemplate(false);
   }, [formType, templates]);
 
-  // Initialize default values & pre-populate from location.state when activeTemplate changes
+  // Initialize default values & pre-populate from location.state when activeTemplate or navigation changes
   useEffect(() => {
     if (!activeTemplate) return;
 
     const initialSizes: Record<string, number> = {};
     const initialAligns: Record<string, VerticalAlignMode> = {};
     const initialValues: Record<string, string> = {};
+    const fromGuideOrMeds =
+      Boolean(locState.fromGuide) ||
+      (Array.isArray(locState.medications) && locState.medications.length > 0);
 
     activeTemplate.fields.forEach((f) => {
       const lower = f.label.toLowerCase();
-      const isReqDate = isDateField(f) && !lower.includes('nascimento');
+      const isReqDate =
+        isDateField(f) &&
+        !lower.includes('nascimento') &&
+        !lower.includes('fornecedor') &&
+        !lower.includes('comprador') &&
+        !lower.includes('dispensa') &&
+        !lower.includes('entrega');
       initialSizes[f.id] = f.fontSize || (isReqDate ? 12.06 : 10);
       initialAligns[f.id] = f.slashDateSlots || f.combCells || f.combCellX ? 'middle' : 'bottom';
 
-      // Pre-fill from location.state if navigating from Ambulatório or Enfermaria
+      if (fromGuideOrMeds && isReqDate) {
+        initialValues[f.id] = todayBr();
+      }
+
+      // Pre-fill from location.state if navigating from Guia de Prescrições, Ambulatório or Enfermaria
       if (locState.patientName && (lower.includes('paciente') || f.id === 'nome')) {
         initialValues[f.id] = locState.patientName;
       }
-      if (locState.cid && lower.includes('cid')) {
+      if (locState.cid && /\bcid(?:\s*-?\s*10)?\b/.test(lower) && !lower.includes('cidade')) {
         initialValues[f.id] = locState.cid;
       }
       if ((locState.dias || locState.diasAfastamento) && lower.includes('dias')) {
@@ -268,10 +325,12 @@ export default function Formularios() {
       }));
       setMedications(mappedMeds);
       setPrescricaoMode('formulario');
-      const prescField = activeTemplate.fields.find((f) => isPrescriptionField(f, activeTemplate));
-      if (prescField) {
-        initialValues[prescField.id] = formatMedicationsToText(mappedMeds);
-      }
+      const formatted = formatMedicationsToText(mappedMeds);
+      activeTemplate.fields
+        .filter((f) => isPrescriptionField(f, activeTemplate))
+        .forEach((pf) => {
+          initialValues[pf.id] = formatted;
+        });
     } else if (locState.prescricao) {
       setPrescricaoMode('livre');
     }
@@ -280,8 +339,27 @@ export default function Formularios() {
     setFieldAlignments(initialAligns);
     setTemplateValues(initialValues);
     setSelectedPresetId('');
+
+    if (locState.fromGuide && appliedLocationKeyRef.current !== location.key) {
+      appliedLocationKeyRef.current = location.key;
+      const requestedControle = locState.selectedForm === 'receita_controle';
+      const requestedSimples = locState.selectedForm === 'receita_simples';
+      if (requestedControle && !isControleEspecialTemplate(activeTemplate)) {
+        toast(
+          `Molde de Controle Especial não encontrado — carregado "${activeTemplate.name}".`,
+          'error'
+        );
+      } else if (requestedSimples && isControleEspecialTemplate(activeTemplate)) {
+        toast(
+          `Molde de Receita Simples não encontrado — carregado "${activeTemplate.name}".`,
+          'info'
+        );
+      } else {
+        toast(`Prescrição pronta no molde "${activeTemplate.name}"!`, 'success');
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTemplate?.id]);
+  }, [activeTemplate?.id, location.key]);
 
   // Keep prescription field synchronized when in 'formulario' mode
   useEffect(() => {
@@ -1530,8 +1608,25 @@ export default function Formularios() {
                                         <option value="Inalatória">Inalatória</option>
                                         <option value="Nasal">Nasal</option>
                                         <option value="Oftálmica">Oftálmica</option>
+                                        <option value="Intravaginal">Intravaginal</option>
+                                        <option value="SNG / Oral">SNG / Oral</option>
                                         <option value="Uso Interno">Uso Interno</option>
                                         <option value="Uso Externo">Uso Externo</option>
+                                        {![
+                                          'Oral',
+                                          'Sublingual',
+                                          'Intravenosa',
+                                          'Intramuscular',
+                                          'Subcutânea',
+                                          'Tópica',
+                                          'Inalatória',
+                                          'Nasal',
+                                          'Oftálmica',
+                                          'Intravaginal',
+                                          'SNG / Oral',
+                                          'Uso Interno',
+                                          'Uso Externo',
+                                        ].includes(med.via) && <option value={med.via}>{med.via}</option>}
                                       </select>
                                     </div>
 

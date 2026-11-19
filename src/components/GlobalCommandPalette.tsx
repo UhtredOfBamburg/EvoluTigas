@@ -8,18 +8,25 @@ import {
   FileText,
   Plus,
   ScanText,
+  BookOpenCheck,
   ArrowRight,
   X,
 } from 'lucide-react';
 import { useEnfermariaPatients } from '@/hooks/useEnfermariaPatients';
 import { useFormTemplates } from '@/hooks/useFormTemplates';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { ALL_PRESCRIPTION_PROTOCOLS } from '@/data/prescricoes';
 
 interface CommandItem {
   id: string;
   title: string;
   subtitle: string;
-  category: 'Enfermaria' | 'Calculadoras & DVA' | 'Ambulatório' | 'Formulários & Ações';
+  category:
+    | 'Enfermaria'
+    | 'Guia de Prescrições'
+    | 'Calculadoras & DVA'
+    | 'Ambulatório'
+    | 'Formulários & Ações';
   keywords: string;
   icon: React.ElementType;
   onSelect: () => void;
@@ -139,6 +146,22 @@ export function GlobalCommandPalette({
         icon: Bed,
         onSelect: () => {
           navigate(`/enfermaria/paciente/${p.id}`);
+          onClose();
+        },
+      });
+    });
+
+    // 1.5 Guia de Prescrições
+    ALL_PRESCRIPTION_PROTOCOLS.forEach((p) => {
+      items.push({
+        id: `presc_${p.id}`,
+        title: `Prescrição: ${p.title} (${p.cid})`,
+        subtitle: `${p.specialties.join(' · ')}${p.shortSubtitle ? ` — ${p.shortSubtitle}` : ''}`,
+        category: 'Guia de Prescrições',
+        keywords: `${p.title} ${p.cid} ${p.specialties.join(' ')} ${p.keywords.join(' ')} prescricao receita`,
+        icon: BookOpenCheck,
+        onSelect: () => {
+          navigate('/prescricoes', { state: { protocolId: p.id } });
           onClose();
         },
       });
