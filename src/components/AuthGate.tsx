@@ -167,7 +167,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               <div className="flex items-start gap-2">
                 <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
                 <span>
-                  <strong>IA Gratuita + Sua Própria IA:</strong> Use a IA integrada grátis ou clique em <em>"Usar Meu ChatGPT / Gemini"</em> em qualquer tela sem custo.
+                  <strong>IA Gratuita (Google Gemini):</strong> Use a cota diária grátis integrada ou conecte sua própria chave gratuita do Google AI Studio em <em>"Configurar IA"</em>.
                 </span>
               </div>
             </div>

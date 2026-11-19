@@ -10,18 +10,20 @@ import {
   markModelTemporarilyBlocked,
   markModelHealthy,
   withTimeout,
-  generateWithChatGpt,
-  generateWithClaude,
+  fetchGeminiModelsFromGoogle,
+  DEFAULT_GEMINI_MODEL,
+  FALLBACK_GEMINI_MODELS,
 } from "./server/aiShared";
 
 async function generateWithGeminiFallback(
   aiClient: GoogleGenAI,
   contents: any,
   isJsonResponse: boolean,
-  preferredModel?: string
+  preferredModel?: string,
+  dynamicModels?: string[]
 ) {
   let lastError: any = null;
-  const candidates = resolveGeminiCandidateModels(preferredModel);
+  const candidates = resolveGeminiCandidateModels(preferredModel, dynamicModels);
 
   for (const modelName of candidates) {
     const baseConfig: Record<string, any> = {
@@ -76,6 +78,20 @@ async function startServer() {
       })
     : null;
 
+  app.post("/api/ai-models", async (req, res) => {
+    const userKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+    const activeKey = userKey || apiKey || "";
+    if (!activeKey) {
+      return res.json({ models: FALLBACK_GEMINI_MODELS, source: "fallback" });
+    }
+    try {
+      const models = await fetchGeminiModelsFromGoogle(activeKey);
+      return res.json({ models, source: "google" });
+    } catch {
+      return res.json({ models: FALLBACK_GEMINI_MODELS, source: "fallback" });
+    }
+  });
+
   app.post("/api/test-ai-provider", async (req, res) => {
     const { provider, apiKey: userKey, model } = req.body ?? {};
     const cleanKey = typeof userKey === "string" ? userKey.trim() : "";
@@ -85,30 +101,7 @@ async function startServer() {
     }
 
     try {
-      if (provider === "chatgpt") {
-        const reply = await generateWithChatGpt(
-          cleanKey,
-          model || "gpt-5.6-sol",
-          "Responda apenas com a palavra: CONECTADO",
-          [],
-          false
-        );
-        return res.json({ ok: true, provider: "chatgpt", sample: reply.trim().slice(0, 60) });
-      }
-
-      if (provider === "claude") {
-        const reply = await generateWithClaude(
-          cleanKey,
-          model || "claude-opus-5-5",
-          "Responda apenas com a palavra: CONECTADO",
-          [],
-          false,
-          false
-        );
-        return res.json({ ok: true, provider: "claude", sample: reply.trim().slice(0, 60) });
-      }
-
-      if (provider === "gemini") {
+      if (provider === "gemini" || provider === "builtin") {
         const customGemini = new GoogleGenAI({
           apiKey: cleanKey,
           httpOptions: {
@@ -121,17 +114,17 @@ async function startServer() {
           customGemini,
           "Responda apenas com a palavra: CONECTADO",
           false,
-          model || "gemini-4-argon"
+          model || DEFAULT_GEMINI_MODEL
         );
         const text = response.text || "CONECTADO";
         return res.json({ ok: true, provider: "gemini", sample: text.trim().slice(0, 60) });
       }
 
-      return res.status(400).json({ ok: false, error: "Provedor de IA inválido." });
+      return res.status(400).json({ ok: false, error: "Apenas o Google Gemini está disponível." });
     } catch (err: any) {
       return res.status(400).json({
         ok: false,
-        error: err?.message || "Não foi possível conectar com este provedor. Verifique sua chave.",
+        error: err?.message || "Não foi possível conectar com o Google Gemini. Verifique sua chave.",
       });
     }
   });
@@ -174,29 +167,15 @@ async function startServer() {
     const provider = aiProviderConfig?.provider || "builtin";
     const userApiKey = typeof aiProviderConfig?.apiKey === "string" ? aiProviderConfig.apiKey.trim() : "";
     const userModel = typeof aiProviderConfig?.model === "string" ? aiProviderConfig.model.trim() : "";
+    const dynamicModels = Array.isArray(aiProviderConfig?.dynamicModels)
+      ? aiProviderConfig.dynamicModels
+      : undefined;
 
     try {
-      if (provider === "chatgpt" && userApiKey) {
-        const resultText = await generateWithChatGpt(
-          userApiKey,
-          userModel || "gpt-5.6-sol",
-          promptText,
-          sanitizedImages,
-          isJsonResponse
-        );
-        return res.json({ text: finalizeAiOutput(type, resultText, outputFormat), provider: "chatgpt" });
-      }
-
-      if (provider === "claude" && userApiKey) {
-        const resultText = await generateWithClaude(
-          userApiKey,
-          userModel || "claude-opus-5-5",
-          promptText,
-          sanitizedImages,
-          isJsonResponse,
-          false
-        );
-        return res.json({ text: finalizeAiOutput(type, resultText, outputFormat), provider: "claude" });
+      if (provider === "chatgpt" || provider === "claude") {
+        return res.status(400).json({
+          error: "Apenas Google Gemini está disponível. Atualize a página e selecione Google Gemini ou IA Integrada.",
+        });
       }
 
       const isCustomGemini = Boolean(provider === "gemini" && userApiKey);
@@ -223,7 +202,7 @@ async function startServer() {
 
       if (!activeGeminiClient) {
         return res.status(500).json({
-          error: "Chave de IA não configurada. Conecte seu Claude, ChatGPT ou Gemini no menu lateral.",
+          error: "Chave do Google Gemini não configurada. Conecte sua chave do Gemini ou ative a cota gratuita no menu lateral.",
         });
       }
 
@@ -244,7 +223,8 @@ async function startServer() {
         activeGeminiClient,
         geminiContents,
         isJsonResponse,
-        userModel || undefined
+        userModel || undefined,
+        dynamicModels
       );
 
       const resultText =

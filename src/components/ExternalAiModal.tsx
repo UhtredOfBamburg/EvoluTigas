@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   useUser,
   AiChatProvider,
@@ -19,10 +19,19 @@ import {
   ExternalLink,
   KeyRound,
   Zap,
+  RefreshCw,
 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
-import { testAiProviderDirect } from '@/lib/aiClient';
+import {
+  testAiProviderDirect,
+  fetchLiveGeminiModels,
+  getCachedLiveGeminiModels,
+  LiveGeminiModelOption,
+} from '@/lib/aiClient';
+import { DEFAULT_GEMINI_MODEL } from '../../server/aiShared';
+
+const GOOGLE_AI_STUDIO_API_KEY_URL = 'https://aistudio.google.com/apikey';
 
 function getDefaultShareUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -37,68 +46,12 @@ function getDefaultShareUrl(): string {
 
 export function getProviderLabel(provider: AiChatProvider): string {
   switch (provider) {
-    case 'claude':
-      return 'Claude (Anthropic)';
-    case 'chatgpt':
-      return 'ChatGPT (OpenAI)';
     case 'gemini':
       return 'Google Gemini';
     default:
       return 'IA Integrada (Grátis)';
   }
 }
-
-const BUILTIN_MODELS = [
-  { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Ultra rápido — Recomendado)' },
-  { value: 'gemini-4-argon', label: 'Gemini Argon (Máximo raciocínio clínico e complexidade)' },
-  { value: 'gemini-flash-latest', label: 'Gemini Flash Latest' },
-  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite (Mais leve)' },
-];
-
-const PROVIDER_META = {
-  claude: {
-    title: 'Conectar com Claude (Anthropic)',
-    desc: 'Evoluções, ambulatório, formulários e exames gerados diretamente pelo Claude (incluindo Opus 5.5).',
-    link: 'https://console.anthropic.com/settings/keys',
-    linkText: 'Obter chave no console da Anthropic',
-    placeholder: 'sk-ant-api03-...',
-    models: [
-      { value: 'claude-opus-5-5', label: 'Claude Opus 5.5 (Máxima inteligência e raciocínio clínico)' },
-      { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Avançado e veloz)' },
-      { value: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet (Extended Thinking)' },
-      { value: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-      { value: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku (Ultra rápido)' },
-    ],
-  },
-  chatgpt: {
-    title: 'Conectar com ChatGPT (OpenAI)',
-    desc: 'Evoluções, ambulatório, formulários e exames gerados diretamente pelo ChatGPT (incluindo 5.6 Sol).',
-    link: 'https://platform.openai.com/api-keys',
-    linkText: 'Obter chave na plataforma OpenAI',
-    placeholder: 'sk-proj-...',
-    models: [
-      { value: 'gpt-5.6-sol', label: 'ChatGPT 5.6 Sol (Última geração — Máxima capacidade)' },
-      { value: 'gpt-5', label: 'GPT-5 (Raciocínio clínico avançado)' },
-      { value: 'o3', label: 'OpenAI o3 (Raciocínio profundo)' },
-      { value: 'gpt-4.5-preview', label: 'GPT-4.5 Preview' },
-      { value: 'gpt-4o', label: 'GPT-4o (Multimodal avançado)' },
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Rápido e econômico)' },
-    ],
-  },
-  gemini: {
-    title: 'Conectar com Google Gemini (Ilimitado)',
-    desc: 'Use sua chave de API oficial do Google Gemini para utilizar o Gemini Argon e 3.8 Flash sem limite diário.',
-    link: 'https://ai.google.dev/',
-    linkText: 'Obter chave oficial da API Google Gemini',
-    placeholder: 'AIzaSy...',
-    models: [
-      { value: 'gemini-4-argon', label: 'Gemini Argon (Máxima capacidade e raciocínio complexo)' },
-      { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Alta velocidade de última geração)' },
-      { value: 'gemini-flash-latest', label: 'Gemini Flash Latest' },
-      { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite (Ultra rápido)' },
-    ],
-  },
-};
 
 export function GlobalModals() {
   const {
@@ -116,7 +69,17 @@ export function GlobalModals() {
   const { toast } = useToast();
 
   const [formState, setFormState] = useState<AiConnectionsState>(DEFAULT_AI_CONNECTIONS);
-  const [customModelMode, setCustomModelMode] = useState<Record<string, boolean>>({});
+  const [customModelMode, setCustomModelMode] = useState<{ builtin: boolean; gemini: boolean }>({
+    builtin: false,
+    gemini: false,
+  });
+  const [geminiModels, setGeminiModels] = useState<LiveGeminiModelOption[]>(
+    () => getCachedLiveGeminiModels().models
+  );
+  const [modelsSource, setModelsSource] = useState<'google' | 'cache' | 'fallback'>(
+    () => getCachedLiveGeminiModels().source
+  );
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [testingProvider, setTestingProvider] = useState<AiChatProvider | null>(null);
   const [testError, setTestError] = useState<string>('');
   const [sharedKeyInput, setSharedKeyInput] = useState<string>('');
@@ -125,6 +88,26 @@ export function GlobalModals() {
   const [copiedWhatsappMsg, setCopiedWhatsappMsg] = useState(false);
   const [shareUrl, setShareUrl] = useState<string>(() => getDefaultShareUrl());
 
+  const syncModelsList = useCallback(
+    async (explicitKey?: string, force = false) => {
+      setRefreshingModels(true);
+      try {
+        const keyToUse = (explicitKey || formState.geminiKey || sharedKeyInput || sharedBuiltinKey || '').trim();
+        const res = await fetchLiveGeminiModels(keyToUse, force);
+        setGeminiModels(res.models);
+        setModelsSource(res.source);
+        if (force && res.source === 'google') {
+          toast(`Lista sincronizada com a Google (${res.models.length} modelos ativos).`, 'success');
+        } else if (force && res.source !== 'google') {
+          toast('Conecte ou cole uma chave do Google AI Studio para consultar novos modelos ao vivo.', 'info');
+        }
+      } finally {
+        setRefreshingModels(false);
+      }
+    },
+    [formState.geminiKey, sharedKeyInput, sharedBuiltinKey, toast]
+  );
+
   useEffect(() => {
     if (currentUser && isAiModalOpen) {
       const conn = { ...DEFAULT_AI_CONNECTIONS, ...(currentUser.aiConnections || {}) };
@@ -132,37 +115,28 @@ export function GlobalModals() {
       setSharedKeyInput(sharedBuiltinKey || '');
       setShowSharedKeyConfig(!sharedBuiltinKey);
       setTestError('');
+
+      const cached = getCachedLiveGeminiModels();
+      setGeminiModels(cached.models);
+      setModelsSource(cached.source);
       setCustomModelMode({
-        claude: Boolean(
-          conn.claudeModel && !PROVIDER_META.claude.models.some((m) => m.value === conn.claudeModel)
-        ),
-        chatgpt: Boolean(
-          conn.chatgptModel && !PROVIDER_META.chatgpt.models.some((m) => m.value === conn.chatgptModel)
-        ),
-        gemini: Boolean(
-          conn.geminiModel && !PROVIDER_META.gemini.models.some((m) => m.value === conn.geminiModel)
-        ),
+        builtin: Boolean(conn.builtinModel && !cached.models.some((m) => m.value === conn.builtinModel)),
+        gemini: Boolean(conn.geminiModel && !cached.models.some((m) => m.value === conn.geminiModel)),
       });
+
+      const keyForSync = (conn.geminiKey || sharedBuiltinKey || '').trim();
+      fetchLiveGeminiModels(keyForSync, false)
+        .then((res) => {
+          setGeminiModels(res.models);
+          setModelsSource(res.source);
+          setCustomModelMode({
+            builtin: Boolean(conn.builtinModel && !res.models.some((m) => m.value === conn.builtinModel)),
+            gemini: Boolean(conn.geminiModel && !res.models.some((m) => m.value === conn.geminiModel)),
+          });
+        })
+        .catch(() => {});
     }
   }, [currentUser, isAiModalOpen, sharedBuiltinKey]);
-
-  const activeExternal =
-    formState.activeProvider !== 'builtin' ? formState.activeProvider : null;
-
-  const getKeyFor = (p: 'claude' | 'chatgpt' | 'gemini') =>
-    p === 'claude' ? formState.claudeKey : p === 'chatgpt' ? formState.chatgptKey : formState.geminiKey;
-
-  const getModelFor = (p: 'claude' | 'chatgpt' | 'gemini') =>
-    p === 'claude' ? formState.claudeModel : p === 'chatgpt' ? formState.chatgptModel : formState.geminiModel;
-
-  const setModelFor = (p: 'claude' | 'chatgpt' | 'gemini', val: string) => {
-    if (p === 'claude') setFormState((prev) => ({ ...prev, claudeModel: val }));
-    else if (p === 'chatgpt') setFormState((prev) => ({ ...prev, chatgptModel: val }));
-    else setFormState((prev) => ({ ...prev, geminiModel: val }));
-  };
-
-  const isConnectedFor = (p: 'claude' | 'chatgpt' | 'gemini') =>
-    p === 'claude' ? formState.claudeConnected : p === 'chatgpt' ? formState.chatgptConnected : formState.geminiConnected;
 
   const handleTestAndSaveSharedBuiltin = async () => {
     setTestError('');
@@ -174,7 +148,7 @@ export function GlobalModals() {
 
     setTestingProvider('builtin');
     try {
-      const result = await testAiProviderDirect('gemini', clean, formState.builtinModel || 'gemini-3.8-flash');
+      const result = await testAiProviderDirect('gemini', clean, formState.builtinModel || DEFAULT_GEMINI_MODEL);
       if (!result.ok) {
         setTestError(result.error || 'Chave inválida. Verifique se copiou a chave completa do Google AI Studio.');
         return;
@@ -197,34 +171,33 @@ export function GlobalModals() {
     }
   };
 
-  const handleTestAndConnect = async (provider: 'claude' | 'chatgpt' | 'gemini') => {
+  const handleTestAndConnectGemini = async () => {
     setTestError('');
-    const key = getKeyFor(provider);
-    const model = getModelFor(provider)?.trim() || PROVIDER_META[provider].models[0].value;
+    const key = formState.geminiKey;
+    const model = (formState.geminiModel || '').trim() || DEFAULT_GEMINI_MODEL;
 
     if (!key?.trim()) {
-      setTestError(`Cole sua chave de API do ${getProviderLabel(provider)} para conectar.`);
+      setTestError('Cole sua chave de API do Google Gemini para conectar.');
       return;
     }
 
-    setTestingProvider(provider);
+    setTestingProvider('gemini');
     try {
-      const data = await testAiProviderDirect(provider, key.trim(), model);
+      const data = await testAiProviderDirect('gemini', key.trim(), model);
       if (!data.ok) {
-        setTestError(data.error || `Não foi possível conectar ao ${getProviderLabel(provider)}.`);
+        setTestError(data.error || 'Não foi possível conectar ao Google Gemini.');
         return;
       }
 
       const nextState: AiConnectionsState = {
         ...formState,
-        activeProvider: provider,
-        ...(provider === 'claude' ? { claudeConnected: true, claudeModel: model } : {}),
-        ...(provider === 'chatgpt' ? { chatgptConnected: true, chatgptModel: model } : {}),
-        ...(provider === 'gemini' ? { geminiConnected: true, geminiModel: model } : {}),
+        activeProvider: 'gemini',
+        geminiConnected: true,
+        geminiModel: model,
       };
       setFormState(nextState);
       await updateAiConnections(nextState);
-      toast(`${getProviderLabel(provider)} (${model}) conectado e ativo!`, 'success');
+      toast(`Google Gemini (${model}) conectado e ativo!`, 'success');
       setIsAiModalOpen(false);
     } catch {
       setTestError('Erro de rede ao testar a conexão. Tente novamente.');
@@ -235,8 +208,8 @@ export function GlobalModals() {
 
   const handleSaveSelection = async () => {
     setTestError('');
-    if (activeExternal && !getKeyFor(activeExternal)?.trim()) {
-      setTestError(`Insira sua chave do ${getProviderLabel(activeExternal)} ou escolha a IA Integrada.`);
+    if (formState.activeProvider === 'gemini' && !formState.geminiKey?.trim()) {
+      setTestError('Insira sua chave gratuita do Google AI Studio ou escolha a IA Integrada.');
       return;
     }
     await updateAiConnections(formState);
@@ -244,7 +217,83 @@ export function GlobalModals() {
     setIsAiModalOpen(false);
   };
 
-  const whatsappInviteText = `Pessoal, liberei o *EvoluTigas* para a nossa turma usar no internato/ambulatório! 🩺📋\n\n🔗 *Link de acesso:* ${shareUrl}\n\n✅ *Como entrar:* Basta digitar seu *Nome* (e uma senha se quiser) para criar seu espaço 100% individual.\n✅ *O que tem lá:* Evolução de Enfermaria, Admissão, Sumário de Alta, Ambulatório Inteligente, Receitas/Atestados/AIH em PDF (preenche 2 vias automático), Transcritor de Exames com VR e Calculadoras Médicas.\n✅ *IA Gratuita + Conexão com Claude Opus 5.5, ChatGPT 5.6 Sol e Gemini Argon/3.8 Flash:* Já vem com cota diária grátis e opção de conectar sua própria IA!`;
+  const renderModelSelector = (target: 'builtin' | 'gemini') => {
+    const selectedModel =
+      target === 'builtin'
+        ? formState.builtinModel || DEFAULT_GEMINI_MODEL
+        : formState.geminiModel || DEFAULT_GEMINI_MODEL;
+    const setSelectedModel = (val: string) =>
+      setFormState((prev) =>
+        target === 'builtin' ? { ...prev, builtinModel: val } : { ...prev, geminiModel: val }
+      );
+    const isCustom = customModelMode[target];
+    const keyHint = target === 'gemini' ? formState.geminiKey : sharedKeyInput || sharedBuiltinKey;
+
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <Label className="text-xs font-semibold text-slate-700">Versão / Modelo Gemini</Label>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => syncModelsList(keyHint, true)}
+              disabled={refreshingModels}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-teal-700 hover:underline disabled:opacity-50"
+              title="Consultar modelos ativos diretamente na API da Google"
+            >
+              <RefreshCw className={`w-3 h-3 ${refreshingModels ? 'animate-spin' : ''}`} />
+              Atualizar da Google
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const nextCustom = !isCustom;
+                setCustomModelMode((prev) => ({ ...prev, [target]: nextCustom }));
+                if (!nextCustom) {
+                  setSelectedModel(geminiModels[0]?.value || DEFAULT_GEMINI_MODEL);
+                }
+              }}
+              className="text-[11px] font-medium text-teal-700 hover:underline"
+            >
+              {isCustom ? 'Escolher da lista' : 'Digitar ID manual'}
+            </button>
+          </div>
+        </div>
+        {isCustom ? (
+          <Input
+            type="text"
+            placeholder="Ex: gemini-flash-latest, gemini-4-hydrogen..."
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="h-9 text-xs font-mono bg-white"
+          />
+        ) : (
+          <select
+            value={
+              geminiModels.some((m) => m.value === selectedModel)
+                ? selectedModel
+                : geminiModels[0]?.value || DEFAULT_GEMINI_MODEL
+            }
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs text-slate-800 font-medium"
+          >
+            {geminiModels.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        )}
+        <p className="text-[10px] text-slate-500">
+          {modelsSource === 'fallback'
+            ? 'Usando ponteiros automáticos (-latest) + fallback inteligente caso algum modelo saia do ar.'
+            : 'Lista sincronizada automaticamente com os modelos ativos da Google (ponteiros -latest nunca ficam desatualizados).'}
+        </p>
+      </div>
+    );
+  };
+
+  const whatsappInviteText = `Pessoal, liberei o *EvoluTigas* para a nossa turma usar no internato/ambulatório! 🩺📋\n\n🔗 *Link de acesso:* ${shareUrl}\n\n✅ *Como entrar:* Basta digitar seu *Nome* (e uma senha se quiser) para criar seu espaço 100% individual.\n✅ *O que tem lá:* Evolução de Enfermaria, Admissão, Sumário de Alta, Ambulatório Inteligente, Receitas/Atestados/AIH em PDF (preenche 2 vias automático), Transcritor de Exames com VR e Calculadoras Médicas.\n✅ *IA Gratuita (Google Gemini):* Já vem com cota diária grátis e opção de conectar sua própria chave gratuita do Google AI Studio!`;
 
   return (
     <>
@@ -255,9 +304,9 @@ export function GlobalModals() {
               <div className="flex items-center gap-2.5">
                 <Bot className="w-5 h-5 text-teal-400" />
                 <div>
-                  <h3 className="font-bold text-base">Conectar IA (Claude, ChatGPT e Gemini)</h3>
+                  <h3 className="font-bold text-base">Configurar Google Gemini</h3>
                   <p className="text-xs text-slate-300">
-                    Escolha qual IA e versão responde diretamente nas evoluções, ambulatório, formulários e exames
+                    Escolha a cota gratuita da turma ou conecte sua chave gratuita do Google AI Studio
                   </p>
                 </div>
               </div>
@@ -267,15 +316,13 @@ export function GlobalModals() {
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {([
-                  { id: 'builtin', label: 'IA Integrada', sub: `Grátis (${remainingToday}/${dailyLimit})` },
-                  { id: 'claude', label: 'Claude', sub: 'Opus 5.5 / Sonnet' },
-                  { id: 'chatgpt', label: 'ChatGPT', sub: '5.6 Sol / GPT-5 / 4o' },
-                  { id: 'gemini', label: 'Gemini', sub: 'Argon / 3.8 Flash' },
+                  { id: 'builtin', label: 'IA Integrada (Cota da Turma)', sub: `Grátis (${remainingToday}/${dailyLimit} usos hoje)` },
+                  { id: 'gemini', label: 'Meu Google Gemini', sub: 'Chave grátis individual (Google AI Studio)' },
                 ] as const).map((item) => {
                   const isSelected = formState.activeProvider === item.id;
-                  const isConn = item.id !== 'builtin' && isConnectedFor(item.id);
+                  const isConn = item.id === 'gemini' && Boolean(formState.geminiKey?.trim()) && Boolean(formState.geminiConnected);
                   return (
                     <button
                       key={item.id}
@@ -322,22 +369,10 @@ export function GlobalModals() {
                     </span>
                   </div>
                   <p className="text-xs text-teal-900/80 leading-relaxed">
-                    Pronta para uso imediato. Cada colega recebe <strong>{dailyLimit} gerações gratuitas por dia</strong> e já pode escolher entre o <strong>Gemini 3.8 Flash</strong> e o <strong>Gemini Argon</strong> abaixo:
+                    Pronta para uso imediato. Cada colega recebe <strong>{dailyLimit} gerações gratuitas por dia</strong> usando a chave compartilhada da turma com atualização automática dos modelos Google Gemini.
                   </p>
-                  <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs font-semibold text-teal-950">Versão do Modelo da IA Integrada</Label>
-                    <select
-                      value={formState.builtinModel || 'gemini-3.8-flash'}
-                      onChange={(e) => setFormState({ ...formState, builtinModel: e.target.value })}
-                      className="w-full h-9 rounded-md border border-teal-300 bg-white px-2.5 text-xs text-slate-800 font-medium"
-                    >
-                      {BUILTIN_MODELS.map((m) => (
-                        <option key={m.value} value={m.value}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+
+                  {renderModelSelector('builtin')}
 
                   <div className="pt-2 border-t border-teal-200/70 space-y-2.5">
                     <div className="flex items-center justify-between flex-wrap gap-2">
@@ -352,7 +387,7 @@ export function GlobalModals() {
                           : 'Ativar chave gratuita da turma (20 usos/dia no Netlify)'}
                       </button>
                       <a
-                        href="https://aistudio.google.com/apikey"
+                        href={GOOGLE_AI_STUDIO_API_KEY_URL}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 underline"
@@ -401,98 +436,69 @@ export function GlobalModals() {
                 </div>
               )}
 
-              {activeExternal && (
+              {formState.activeProvider === 'gemini' && (
                 <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
                       <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                        {PROVIDER_META[activeExternal].title}
-                        {isConnectedFor(activeExternal) && (
+                        Conectar sua Chave Grátis do Google Gemini
+                        {formState.geminiConnected && formState.geminiKey?.trim() && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                             <CheckCircle2 className="w-3 h-3" /> Conectado
                           </span>
                         )}
                       </h4>
-                      <p className="text-xs text-slate-600 mt-0.5">{PROVIDER_META[activeExternal].desc}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Tenha sua própria cota individual gratuita no Google AI Studio sem dividir os 20 usos/dia da turma.
+                      </p>
                     </div>
                     <a
-                      href={PROVIDER_META[activeExternal].link}
+                      href={GOOGLE_AI_STUDIO_API_KEY_URL}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 underline"
                     >
-                      {PROVIDER_META[activeExternal].linkText} <ExternalLink className="w-3 h-3" />
+                      Gerar chave grátis no Google AI Studio <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
 
-                  <p className="text-[11px] text-slate-500 bg-white/80 border border-slate-200/80 rounded-lg px-3 py-2 leading-relaxed">
-                    {activeExternal === 'gemini'
-                      ? 'Dica: No Google AI Studio você gera uma chave gratuita em 20 segundos sem cartão de crédito — cada colega com sua própria chave evita limite compartilhado.'
-                      : 'Nota técnica: OpenAI e Anthropic não permitem usar assinaturas web (ChatGPT Plus / Claude Pro) via login em sites externos; a conexão oficial é sempre por Chave de API (paga por centavos de uso) ou pelo Google Gemini gratuito.'}
-                  </p>
+                  <div className="text-[11px] text-slate-600 bg-white/90 border border-slate-200/80 rounded-lg px-3 py-2.5 leading-relaxed space-y-1">
+                    <p>
+                      <strong>Como funciona na prática:</strong> acesse o{' '}
+                      <a
+                        href={GOOGLE_AI_STUDIO_API_KEY_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-teal-700 underline font-semibold"
+                      >
+                        Google AI Studio (aistudio.google.com/apikey)
+                      </a>
+                      , faça login com sua conta Google e clique em <em>Create API key</em> — leva 20 segundos e{' '}
+                      <strong>não pede cartão de crédito</strong>.
+                    </p>
+                    <p>
+                      O plano gratuito tem limite próprio de requisições/dia (ideal para seu uso individual) nos modelos{' '}
+                      <strong>Flash / Flash Lite / Hydrogen</strong>. Modelos <strong>Pro / Argon</strong> em geral exigem conta com faturamento (billing) ativo no Google Cloud — se algum modelo sair do ar ou atingir cota, o EvoluTigas troca automaticamente para outro modelo ativo.
+                    </p>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                         <KeyRound className="w-3.5 h-3.5 text-teal-600" />
-                        Chave de API ({getProviderLabel(activeExternal)})
+                        Chave de API (Google AI Studio)
                       </Label>
                       <Input
                         type="password"
-                        placeholder={PROVIDER_META[activeExternal].placeholder}
-                        value={getKeyFor(activeExternal) || ''}
+                        placeholder="AIzaSy..."
+                        value={formState.geminiKey || ''}
                         onChange={(e) => {
-                          const val = e.target.value;
-                          if (activeExternal === 'claude') {
-                            setFormState({ ...formState, claudeKey: val, claudeConnected: false });
-                          } else if (activeExternal === 'chatgpt') {
-                            setFormState({ ...formState, chatgptKey: val, chatgptConnected: false });
-                          } else {
-                            setFormState({ ...formState, geminiKey: val, geminiConnected: false });
-                          }
+                          setFormState({ ...formState, geminiKey: e.target.value, geminiConnected: false });
                         }}
                         className="h-9 text-xs font-mono bg-white"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-semibold text-slate-700">Versão da IA / Modelo</Label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextCustom = !customModelMode[activeExternal];
-                            setCustomModelMode((prev) => ({ ...prev, [activeExternal]: nextCustom }));
-                            if (!nextCustom) {
-                              setModelFor(activeExternal, PROVIDER_META[activeExternal].models[0].value);
-                            }
-                          }}
-                          className="text-[11px] font-medium text-teal-700 hover:underline"
-                        >
-                          {customModelMode[activeExternal] ? 'Escolher da lista' : 'Digitar ID manual'}
-                        </button>
-                      </div>
-                      {customModelMode[activeExternal] ? (
-                        <Input
-                          type="text"
-                          placeholder="Ex: claude-opus-5-5, gpt-5.6-sol, gemini-4-argon..."
-                          value={getModelFor(activeExternal) || ''}
-                          onChange={(e) => setModelFor(activeExternal, e.target.value)}
-                          className="h-9 text-xs font-mono bg-white"
-                        />
-                      ) : (
-                        <select
-                          value={getModelFor(activeExternal) || PROVIDER_META[activeExternal].models[0].value}
-                          onChange={(e) => setModelFor(activeExternal, e.target.value)}
-                          className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs text-slate-800 font-medium"
-                        >
-                          {PROVIDER_META[activeExternal].models.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
+                    {renderModelSelector('gemini')}
                   </div>
 
                   <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
@@ -502,11 +508,11 @@ export function GlobalModals() {
                     <Button
                       type="button"
                       size="sm"
-                      disabled={testingProvider === activeExternal}
-                      onClick={() => handleTestAndConnect(activeExternal)}
+                      disabled={testingProvider === 'gemini'}
+                      onClick={handleTestAndConnectGemini}
                       className="bg-teal-600 hover:bg-teal-700 text-white text-xs"
                     >
-                      {testingProvider === activeExternal ? (
+                      {testingProvider === 'gemini' ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                           Testando conexão...
@@ -514,7 +520,7 @@ export function GlobalModals() {
                       ) : (
                         <>
                           <Check className="w-3.5 h-3.5 mr-1.5" />
-                          Testar e Conectar {getProviderLabel(activeExternal)}
+                          Testar e Conectar Google Gemini
                         </>
                       )}
                     </Button>

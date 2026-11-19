@@ -6,6 +6,7 @@ import {
   mergeAiConnections,
 } from '@/contexts/UserContext';
 import { executeAiGeneration, ExecuteAiPayload } from '@/lib/aiClient';
+import { DEFAULT_GEMINI_MODEL } from '../../server/aiShared';
 
 export type AiGenerateType =
   | 'evolucao'
@@ -81,46 +82,24 @@ export function useAiGenerate() {
 
       let aiProviderConfig: { provider: string; apiKey?: string; model?: string } = {
         provider: 'builtin',
-        model: aiConn.builtinModel || 'gemini-3.8-flash',
+        model: aiConn.builtinModel || DEFAULT_GEMINI_MODEL,
       };
 
-      if (activeProvider === 'claude') {
-        if (!aiConn.claudeKey?.trim()) {
-          toast('Conecte sua chave do Claude (Anthropic) para usar o Claude diretamente.', 'info');
-          setIsAiModalOpen(true);
-          return null;
-        }
-        aiProviderConfig = {
-          provider: 'claude',
-          apiKey: aiConn.claudeKey.trim(),
-          model: aiConn.claudeModel || 'claude-opus-5-5',
-        };
-      } else if (activeProvider === 'chatgpt') {
-        if (!aiConn.chatgptKey?.trim()) {
-          toast('Conecte sua chave do ChatGPT (OpenAI) para usar o ChatGPT diretamente.', 'info');
-          setIsAiModalOpen(true);
-          return null;
-        }
-        aiProviderConfig = {
-          provider: 'chatgpt',
-          apiKey: aiConn.chatgptKey.trim(),
-          model: aiConn.chatgptModel || 'gpt-5.6-sol',
-        };
-      } else if (activeProvider === 'gemini') {
+      if (activeProvider === 'gemini') {
         if (!aiConn.geminiKey?.trim()) {
-          toast('Conecte sua chave do Google Gemini para uso ilimitado.', 'info');
+          toast('Conecte sua chave gratuita do Google Gemini no menu "Conectar IA".', 'info');
           setIsAiModalOpen(true);
           return null;
         }
         aiProviderConfig = {
           provider: 'gemini',
           apiKey: aiConn.geminiKey.trim(),
-          model: aiConn.geminiModel || 'gemini-4-argon',
+          model: aiConn.geminiModel || DEFAULT_GEMINI_MODEL,
         };
       } else {
         if (remainingToday <= 0) {
           toast(
-            'Sua cota diária gratuita (20/dia) terminou hoje. Conecte seu Claude, ChatGPT ou Gemini para continuar sem limites!',
+            'Sua cota diária gratuita (20/dia) terminou hoje. Conecte sua própria chave gratuita do Google Gemini no Google AI Studio!',
             'info'
           );
           setIsAiModalOpen(true);
@@ -166,9 +145,9 @@ export function useAiGenerate() {
         console.error('useAiGenerate error:', err);
         const rawMsg = err && typeof err.message === 'string' ? err.message : '';
 
-        if (rawMsg.includes('MISSING_AI_KEY') || rawMsg.includes('Chave de IA não configurada')) {
+        if (rawMsg.includes('MISSING_AI_KEY') || rawMsg.includes('Chave de IA não configurada') || rawMsg.includes('Chave do Google Gemini')) {
           toast(
-            'Conecte uma chave de IA (Gemini gratuito, Claude ou ChatGPT) para ativar as funções de IA.',
+            'Conecte uma chave do Google Gemini (grátis no Google AI Studio) ou ative a Chave da Turma para usar a IA.',
             'info'
           );
           setIsAiModalOpen(true);

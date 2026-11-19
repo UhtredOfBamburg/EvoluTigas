@@ -158,13 +158,13 @@ export default function Layout() {
               type="button"
               onClick={() => setIsAiModalOpen(true)}
               className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-white hover:bg-teal-50 text-teal-900 border border-teal-200 transition-colors shadow-2xs"
-              title="Conectar com Claude, ChatGPT ou Gemini"
+              title="Configurar Google Gemini"
             >
               <span className="flex items-center gap-1.5 truncate">
                 <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0" />
                 <span className="truncate">{activeAiLabel}</span>
               </span>
-              <span className="text-[10px] font-bold text-teal-600 shrink-0">Trocar IA</span>
+              <span className="text-[10px] font-bold text-teal-600 shrink-0">Configurar</span>
             </button>
           </div>
         )}
@@ -288,7 +288,7 @@ export default function Layout() {
       {/* Global Search Palette (Ctrl+K) */}
       <GlobalCommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
 
-      {/* Global Modals (Connect Claude/ChatGPT/Gemini & Share with Classmates) */}
+      {/* Global Modals (Google Gemini & Share with Classmates) */}
       <GlobalModals />
     </div>
   );

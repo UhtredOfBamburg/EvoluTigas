@@ -3,20 +3,112 @@ import { doc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import {
   SanitizedImage,
+  LiveGeminiModelOption,
+  FALLBACK_GEMINI_MODELS,
+  fetchGeminiModelsFromGoogle,
   prepareAiRequestContent,
   finalizeAiOutput,
   resolveGeminiCandidateModels,
   markModelTemporarilyBlocked,
   markModelHealthy,
   withTimeout,
-  generateWithChatGpt,
-  generateWithClaude,
 } from '../../server/aiShared';
 
 export const SHARED_BUILTIN_KEY_STORAGE = 'evolutigas_global_builtin_gemini_key_v1';
+const LIVE_GEMINI_MODELS_STORAGE = 'evolutigas_live_gemini_models_v1';
+const LIVE_GEMINI_MODELS_TTL_MS = 6 * 60 * 60 * 1000;
 
-export type { SanitizedImage };
-export { sanitizeInlineData } from '../../server/aiShared';
+export type { SanitizedImage, LiveGeminiModelOption };
+export { sanitizeInlineData, FALLBACK_GEMINI_MODELS } from '../../server/aiShared';
+
+export interface LiveGeminiModelsResult {
+  models: LiveGeminiModelOption[];
+  updatedAt: number;
+  source: 'google' | 'cache' | 'fallback';
+}
+
+export function getCachedLiveGeminiModels(): LiveGeminiModelsResult {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem(LIVE_GEMINI_MODELS_STORAGE);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.models) && parsed.models.length > 0) {
+          return {
+            models: parsed.models,
+            updatedAt: Number(parsed.updatedAt) || 0,
+            source: 'cache',
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return { models: FALLBACK_GEMINI_MODELS, updatedAt: 0, source: 'fallback' };
+}
+
+function saveLiveGeminiModelsCache(models: LiveGeminiModelOption[]): number {
+  const now = Date.now();
+  try {
+    if (typeof window !== 'undefined' && models.length > 0) {
+      window.localStorage.setItem(
+        LIVE_GEMINI_MODELS_STORAGE,
+        JSON.stringify({ models, updatedAt: now })
+      );
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return now;
+}
+
+export async function fetchLiveGeminiModels(
+  apiKey?: string,
+  forceRefresh = false
+): Promise<LiveGeminiModelsResult> {
+  const cached = getCachedLiveGeminiModels();
+  const isFresh =
+    cached.source === 'cache' &&
+    cached.updatedAt > 0 &&
+    Date.now() - cached.updatedAt < LIVE_GEMINI_MODELS_TTL_MS;
+
+  if (!forceRefresh && isFresh) {
+    return cached;
+  }
+
+  const activeKey = (apiKey || '').trim() || getBuiltinGeminiApiKey();
+
+  if (activeKey) {
+    try {
+      const liveModels = await fetchGeminiModelsFromGoogle(activeKey);
+      const updatedAt = saveLiveGeminiModelsCache(liveModels);
+      return { models: liveModels, updatedAt, source: 'google' };
+    } catch (err) {
+      console.warn('[AI Client] Could not list live Gemini models directly:', err);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/ai-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: activeKey }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (Array.isArray(data?.models) && data.models.length > 0 && data.source === 'google') {
+        const updatedAt = saveLiveGeminiModelsCache(data.models);
+        return { models: data.models, updatedAt, source: 'google' };
+      }
+    }
+  } catch {
+    // ignore backend error when offline
+  }
+
+  return cached;
+}
 
 export function reportClientErrorToCloud(context: string, err: unknown, extra?: Record<string, any>) {
   try {
@@ -55,6 +147,11 @@ export function getBuiltinGeminiApiKey(): string {
   return '';
 }
 
+function getCachedDynamicModelIds(): string[] {
+  const cached = getCachedLiveGeminiModels();
+  return cached.source !== 'fallback' ? cached.models.map((m) => m.value) : [];
+}
+
 export async function generateWithGeminiClient(
   apiKey: string,
   promptText: string,
@@ -63,7 +160,7 @@ export async function generateWithGeminiClient(
   preferredModel?: string
 ): Promise<string> {
   const aiClient = new GoogleGenAI({ apiKey: apiKey.trim() });
-  const candidates = resolveGeminiCandidateModels(preferredModel);
+  const candidates = resolveGeminiCandidateModels(preferredModel, getCachedDynamicModelIds());
 
   const contents =
     images.length > 0
@@ -92,7 +189,7 @@ export async function generateWithGeminiClient(
           contents,
           config: baseConfig,
         }),
-        22000,
+        18000,
         modelName
       );
 
@@ -124,7 +221,7 @@ export async function generateWithGeminiClient(
 }
 
 async function testViaBackend(
-  provider: 'claude' | 'chatgpt' | 'gemini',
+  provider: 'gemini' | 'builtin',
   apiKey: string,
   model?: string
 ): Promise<{ ok: boolean; sample?: string; error?: string } | null> {
@@ -150,62 +247,45 @@ async function testViaBackend(
 }
 
 export async function testAiProviderDirect(
-  provider: 'claude' | 'chatgpt' | 'gemini',
+  provider: 'gemini' | 'builtin',
   apiKey: string,
   model?: string
 ): Promise<{ ok: boolean; sample?: string; error?: string }> {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) {
-    return { ok: false, error: 'Insira a chave de acesso para testar a conexão.' };
+    return { ok: false, error: 'Insira a chave de acesso do Google Gemini para testar a conexão.' };
+  }
+
+  if (provider !== 'gemini' && provider !== 'builtin') {
+    return { ok: false, error: 'Apenas o Google Gemini está disponível.' };
   }
 
   try {
-    if (provider === 'chatgpt') {
-      const reply = await generateWithChatGpt(
-        cleanKey,
-        model,
-        'Responda apenas com a palavra: CONECTADO',
-        [],
-        false
-      );
-      return { ok: true, sample: reply.trim().slice(0, 60) };
-    }
-
-    if (provider === 'claude') {
-      const reply = await generateWithClaude(
-        cleanKey,
-        model,
-        'Responda apenas com a palavra: CONECTADO',
-        [],
-        false,
-        true
-      );
-      return { ok: true, sample: reply.trim().slice(0, 60) };
-    }
-
-    if (provider === 'gemini') {
-      const reply = await generateWithGeminiClient(
-        cleanKey,
-        'Responda apenas com a palavra: CONECTADO',
-        [],
-        false,
-        model
-      );
-      return { ok: true, sample: reply.trim().slice(0, 60) };
-    }
+    const reply = await generateWithGeminiClient(
+      cleanKey,
+      'Responda apenas com a palavra: CONECTADO',
+      [],
+      false,
+      model
+    );
+    fetchLiveGeminiModels(cleanKey, true).catch(() => {});
+    return { ok: true, sample: reply.trim().slice(0, 60) };
   } catch (directErr: any) {
     const backendResult = await testViaBackend(provider, cleanKey, model);
-    if (backendResult) return backendResult;
+    if (backendResult) {
+      if (backendResult.ok) {
+        fetchLiveGeminiModels(cleanKey, true).catch(() => {});
+      }
+      return backendResult;
+    }
 
     return {
       ok: false,
       error:
         directErr?.message ||
-        'Não foi possível conectar com este provedor. Verifique se a chave está correta.',
+        'Não foi possível conectar com o Google Gemini. Verifique se a chave está correta.',
     };
   }
-
-  return { ok: false, error: 'Provedor de IA inválido.' };
 }
 
 export interface ExecuteAiPayload {
@@ -222,6 +302,7 @@ export interface ExecuteAiPayload {
     provider: string;
     apiKey?: string;
     model?: string;
+    dynamicModels?: string[];
   };
 }
 
@@ -231,28 +312,12 @@ export async function executeAiGeneration(
   const { type, outputFormat, aiProviderConfig } = payload;
   const { promptText, sanitizedImages, isJsonResponse } = prepareAiRequestContent(payload);
 
-  const provider = aiProviderConfig?.provider || 'builtin';
+  const rawProvider = aiProviderConfig?.provider || 'builtin';
+  const provider = rawProvider === 'claude' || rawProvider === 'chatgpt' ? 'builtin' : rawProvider;
   const userApiKey = typeof aiProviderConfig?.apiKey === 'string' ? aiProviderConfig.apiKey.trim() : '';
   const userModel = typeof aiProviderConfig?.model === 'string' ? aiProviderConfig.model.trim() : '';
 
-  // 1. Direct browser execution when user supplies a personal key (avoids 10s serverless timeout on Netlify)
-  if (provider === 'chatgpt' && userApiKey) {
-    const text = await generateWithChatGpt(userApiKey, userModel, promptText, sanitizedImages, isJsonResponse);
-    return { text: finalizeAiOutput(type, text, outputFormat), provider: 'chatgpt' };
-  }
-
-  if (provider === 'claude' && userApiKey) {
-    const text = await generateWithClaude(
-      userApiKey,
-      userModel,
-      promptText,
-      sanitizedImages,
-      isJsonResponse,
-      true
-    );
-    return { text: finalizeAiOutput(type, text, outputFormat), provider: 'claude' };
-  }
-
+  // 1. Direct browser execution when user supplies a personal Google Gemini key
   if (provider === 'gemini' && userApiKey) {
     try {
       const text = await generateWithGeminiClient(
@@ -296,6 +361,7 @@ export async function executeAiGeneration(
       ...payload.aiProviderConfig,
       provider,
       apiKey: userApiKey || (provider === 'builtin' && sharedKey ? sharedKey : undefined),
+      dynamicModels: getCachedDynamicModelIds(),
     },
   };
 
@@ -314,7 +380,7 @@ export async function executeAiGeneration(
     rawResponseText.trim().startsWith('<html')
   ) {
     throw new Error(
-      'MISSING_AI_KEY: Para usar a IA no site publicado, conecte sua chave gratuita do Google Gemini, Claude ou ChatGPT no botão "Conectar IA", ou ative a Chave da Turma.'
+      'MISSING_AI_KEY: Para usar a IA no site publicado, conecte sua chave gratuita do Google Gemini no botão "Conectar IA", ou ative a Chave da Turma.'
     );
   }
 

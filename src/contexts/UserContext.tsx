@@ -6,18 +6,13 @@ import {
   subscribeWorkspaceFromCloud,
 } from '@/hooks/useLocalStorage';
 import { SHARED_BUILTIN_KEY_STORAGE, getBuiltinGeminiApiKey } from '@/lib/aiClient';
+import { DEFAULT_GEMINI_MODEL, normalizeGeminiModelId } from '../../server/aiShared';
 
-export type AiChatProvider = 'builtin' | 'claude' | 'chatgpt' | 'gemini';
+export type AiChatProvider = 'builtin' | 'gemini';
 
 export interface AiConnectionsState {
   activeProvider: AiChatProvider;
   builtinModel?: string;
-  claudeKey?: string;
-  claudeModel?: string;
-  claudeConnected?: boolean;
-  chatgptKey?: string;
-  chatgptModel?: string;
-  chatgptConnected?: boolean;
   geminiKey?: string;
   geminiModel?: string;
   geminiConnected?: boolean;
@@ -26,33 +21,41 @@ export interface AiConnectionsState {
 
 export const DEFAULT_AI_CONNECTIONS: AiConnectionsState = {
   activeProvider: 'builtin',
-  builtinModel: 'gemini-3.8-flash',
-  claudeKey: '',
-  claudeModel: 'claude-opus-5-5',
-  claudeConnected: false,
-  chatgptKey: '',
-  chatgptModel: 'gpt-5.6-sol',
-  chatgptConnected: false,
+  builtinModel: DEFAULT_GEMINI_MODEL,
   geminiKey: '',
-  geminiModel: 'gemini-4-argon',
+  geminiModel: DEFAULT_GEMINI_MODEL,
   geminiConnected: false,
   updatedAt: 0,
 };
 
-function normalizeAiConnections(conn?: Partial<AiConnectionsState>): AiConnectionsState {
-  const merged: AiConnectionsState = {
-    ...DEFAULT_AI_CONNECTIONS,
-    ...(conn || {}),
+function normalizeAiConnections(conn?: Partial<AiConnectionsState> & Record<string, any>): AiConnectionsState {
+  const rawProvider = conn?.activeProvider;
+  const geminiKey = typeof conn?.geminiKey === 'string' ? conn.geminiKey : '';
+  const geminiConnected = Boolean(geminiKey.trim()) && Boolean(conn?.geminiConnected);
+
+  const activeProvider: AiChatProvider =
+    rawProvider === 'gemini'
+      ? 'gemini'
+      : rawProvider === 'builtin'
+      ? 'builtin'
+      : geminiConnected
+      ? 'gemini'
+      : 'builtin';
+
+  const builtinModel = normalizeGeminiModelId(conn?.builtinModel || DEFAULT_GEMINI_MODEL);
+  let geminiModel = normalizeGeminiModelId(conn?.geminiModel || DEFAULT_GEMINI_MODEL);
+  if (!geminiConnected && !geminiKey.trim() && geminiModel === 'gemini-4-argon') {
+    geminiModel = DEFAULT_GEMINI_MODEL;
+  }
+
+  return {
+    activeProvider,
+    builtinModel,
+    geminiKey,
+    geminiModel,
+    geminiConnected,
+    updatedAt: Number(conn?.updatedAt) || 0,
   };
-  if (merged.geminiModel === 'gemini-2.5-flash') {
-    merged.geminiModel = 'gemini-3.8-flash';
-  } else if (merged.geminiModel === 'gemini-2.5-pro') {
-    merged.geminiModel = 'gemini-4-argon';
-  }
-  if (!merged.builtinModel) {
-    merged.builtinModel = 'gemini-3.8-flash';
-  }
-  return merged;
 }
 
 /**
@@ -76,8 +79,6 @@ export function mergeAiConnections(
     return cleanC || cleanL;
   };
 
-  const claudeKey = pickKey(c.claudeKey, l.claudeKey);
-  const chatgptKey = pickKey(c.chatgptKey, l.chatgptKey);
   const geminiKey = pickKey(c.geminiKey, l.geminiKey);
 
   let activeProvider: AiChatProvider = preferLocal ? l.activeProvider : c.activeProvider;
@@ -92,12 +93,6 @@ export function mergeAiConnections(
   return normalizeAiConnections({
     activeProvider,
     builtinModel: (preferLocal ? l.builtinModel : c.builtinModel) || c.builtinModel || l.builtinModel,
-    claudeKey,
-    claudeModel: (preferLocal ? l.claudeModel : c.claudeModel) || c.claudeModel || l.claudeModel,
-    claudeConnected: Boolean(claudeKey) && Boolean(c.claudeConnected || l.claudeConnected),
-    chatgptKey,
-    chatgptModel: (preferLocal ? l.chatgptModel : c.chatgptModel) || c.chatgptModel || l.chatgptModel,
-    chatgptConnected: Boolean(chatgptKey) && Boolean(c.chatgptConnected || l.chatgptConnected),
     geminiKey,
     geminiModel: (preferLocal ? l.geminiModel : c.geminiModel) || c.geminiModel || l.geminiModel,
     geminiConnected: Boolean(geminiKey) && Boolean(c.geminiConnected || l.geminiConnected),

@@ -233,7 +233,7 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* AI Connection Banner (Claude, ChatGPT, Gemini & Built-in) */}
+      {/* AI Connection Banner (Google Gemini & Built-in) */}
       <Card className="bg-gradient-to-br from-teal-50 to-white border-teal-100">
         <CardContent className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
@@ -246,7 +246,8 @@ export default function Dashboard() {
                 {activeProvider === 'builtin' ? ` (${remainingToday}/${dailyLimit} usos hoje)` : ''}
               </h3>
               <p className="text-teal-800/80 text-xs max-w-2xl leading-relaxed">
-                Use a IA integrada gratuitamente ou conecte seu próprio <strong>Claude (Anthropic)</strong>, <strong>ChatGPT (OpenAI)</strong> ou <strong>Google Gemini</strong> para que todos os botões do aplicativo funcionem diretamente com a sua IA preferida.
+                Use a IA integrada gratuitamente (cota da turma) ou conecte sua própria chave gratuita do{' '}
+                <strong>Google Gemini (AI Studio)</strong> para ter cota individual com modelos sempre atualizados.
               </p>
             </div>
           </div>
@@ -256,7 +257,7 @@ export default function Dashboard() {
               onClick={() => setIsAiModalOpen(true)}
               className="border-teal-300 text-teal-800 bg-white hover:bg-teal-50"
             >
-              <Sparkles className="w-4 h-4 mr-1.5 text-teal-600" /> Conectar Claude / ChatGPT / Gemini
+              <Sparkles className="w-4 h-4 mr-1.5 text-teal-600" /> Configurar Google Gemini
             </Button>
             <Button
               onClick={() => navigate('/ai-tools')}
